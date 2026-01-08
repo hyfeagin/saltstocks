@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ "Add Resale Item" if mode=="new" else "Edit Resale Item" }}</h1>
+
+<div class="card">
+  {% if mode == "edit" and item %}
+    <div class="muted" style="margin-bottom:10px;">
+      <b>SKU (read-only):</b> <code>{{ item["sku"] }}</code>
+    </div>
+  {% endif %}
+
+  <form method="post" action="{{ '/resale/new' if mode=='new' else '/resale/' ~ item['id'] ~ '/edit' }}">
+    <div class="row">
+      <div>
+        <label>Company</label>
+        {% set co = (item["company"] if item and item["company"] else "GV") %}
+        <select name="company">
+          <option value="GV" {{ 'selected' if co=='GV' else '' }}>GV (Geekery Vault)</option>
+          <option value="UM" {{ 'selected' if co=='UM' else '' }}>UM (Umivera / Lavender Lore)</option>
+        </select>
+        <div class="muted">Used in SKU prefix. Resale defaults to GV.</div>
+      </div>
+
+      <div>
+        <label>Category</label>
+        {% set cat = (item["category"] if item and item["category"] else "Collectibles") %}
+        <select name="category">
+          {% for opt in ['Soap/Bath & Beauty','Books/Media','Decor','Collectibles','Toys','Clothing'] %}
+            <option value="{{ opt }}" {{ 'selected' if cat==opt else '' }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label>Brand (optional)</label>
+        <input name="brand" value="{{ item['brand'] if item and item['brand'] else '' }}" placeholder="Funko, LEGO, NECA..." />
+        <div class="muted">If Brand Code is blank, we’ll derive it from Brand.</div>
+      </div>
+
+      <div>
+        <label>Brand Code / Item Code (optional)</label>
+        <input name="brand_code" value="{{ item['brand_code'] if item and item['brand_code'] else '' }}" placeholder="FUNKO, LEGO, NECA, SALT, OIL..." />
+        <div class="muted">This becomes the middle of the SKU. If blank, defaults to derived Brand or MISC.</div>
+      </div>
+
+      <div>
+        <label>IP / Franchise (optional)</label>
+        <input name="ip" value="{{ item['ip'] if item and item['ip'] else '' }}" placeholder="Marvel, Spawn, Star Wars..." />
+      </div>
+
+      <div>
+        <label>Name</label>
+        <input name="name" value="{{ item['name'] if item else '' }}" required placeholder="e.g., Funko Pop Captain America #123" />
+      </div>
+
+      <div>
+        <label>Qty on hand (multiples supported)</label>
+        <input type="number" step="1" name="qty_on_hand" value="{{ item['qty_on_hand'] if item else 1 }}" />
+      </div>
+
+      <div>
+        <label>Unit cost ($ per each)</label>
+        <input type="number" step="0.01" name="unit_cost" value="{{ item['unit_cost'] if item else 0 }}" />
+      </div>
+
+      <div>
+        <label>Location</label>
+        <input name="location" value="{{ item['location'] if item else '' }}" placeholder="Tote A3, Shelf 2..." />
+      </div>
+
+      <div>
+        <label>Condition</label>
+        <input name="condition" value="{{ item['condition'] if item else '' }}" placeholder="New, Open box, Used..." />
+      </div>
+
+      <div>
+        <label>Tags</label>
+        <input name="tags" value="{{ item['tags'] if item else '' }}" placeholder="funko, marvel, con, hero" />
+      </div>
+
+      <div>
+        <label>Status</label>
+        {% set s = item['status'] if item else 'unlisted' %}
+        <select name="status">
+          {% for opt in ['unlisted','listed','sold','donated','trashed'] %}
+            <option value="{{ opt }}" {{ 'selected' if s==opt else '' }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label>Channel</label>
+        {% set c = item['channel'] if item else 'unassigned' %}
+        <select name="channel">
+          {% for opt in ['unassigned','ebay','etsy','shopify','local','mercari','whatnot'] %}
+            <option value="{{ opt }}" {{ 'selected' if c==opt else '' }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label>List price (optional)</label>
+        <input type="number" step="0.01" name="list_price" value="{{ item['list_price'] if item and item['list_price'] else '' }}" />
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label>URL (optional)</label>
+        <input name="url" value="{{ item['url'] if item else '' }}" placeholder="Listing link" />
+      </div>
+
+      <div style="grid-column: 1 / -1;">
+        <label>Notes</label>
+        <textarea name="notes" rows="4">{{ item['notes'] if item else '' }}</textarea>
+      </div>
+
+      {% if mode == "new" %}
+      <div style="grid-column: 1 / -1;" class="muted">
+        SKU will be auto-generated when you save (read-only).
+      </div>
+      {% endif %}
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:10px;">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <a class="btn" href="/resale" style="text-decoration:none; display:inline-block;">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

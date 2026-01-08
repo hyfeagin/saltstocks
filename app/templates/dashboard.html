@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Salt Stocks</h1>
+
+<div class="card">
+  <h3>Quick stats</h3>
+  <ul>
+    <li>Total resale items: <b>{{ resale_count }}</b></li>
+    <li>Unlisted resale items: <b>{{ unlisted }}</b></li>
+    <li>Out-of-stock resale rows (qty <= 0): <b>{{ low_qty }}</b></li>
+  </ul>
+
+  <form method="post" action="/backup">
+    <button class="btn btn-primary" type="submit">Backup Now</button>
+    <span class="muted">Creates a timestamped copy of your database in <code>data/backups</code>.</span>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Next</h3>
+  <p class="muted">Phase 2: Materials (oz), Recipes, Batches, and COGS per jar.</p>
+</div>
+{% endblock %}

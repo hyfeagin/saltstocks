@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>{{ title if title else "Salt Stocks" }}</title>
+  <style>
+    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial; margin: 24px; }
+    nav a { margin-right: 12px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 12px 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
+    input, select, textarea { padding: 8px; width: 100%; box-sizing: border-box; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { padding: 8px 12px; border: 1px solid #333; border-radius: 8px; background: #fff; cursor: pointer; }
+    .btn-primary { background: #111; color: #fff; border-color: #111; }
+    .muted { color: #666; }
+    .pill { padding: 2px 8px; border: 1px solid #ccc; border-radius: 999px; font-size: 12px; display: inline-block; }
+  </style>
+</head>
+<body>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/resale">Resale Inventory</a>
+  </nav>
+  <hr />
+  {% block content %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Resale Inventory</h1>
+
+<div class="card">
+  <form method="get" action="/resale" class="row">
+    <div>
+      <label>Search</label>
+      <input name="q" value="{{ q }}" placeholder="name, sku, tags..." />
+    </div>
+    <div style="align-self:end">
+      <button class="btn" type="submit">Search</button>
+      <a class="btn btn-primary" href="/resale/new" style="text-decoration:none; display:inline-block;">Add Item</a>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Excel (CSV) Import/Export</h3>
+  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
+    <a class="btn" href="/resale/export" style="text-decoration:none; display:inline-block;">Export CSV</a>
+
+    <form method="post" action="/resale/import" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:end;">
+      <div>
+        <label>Import mode</label>
+        <select name="mode">
+          <option value="update">Replace tags from CSV</option>
+          <option value="append_tags" selected>Append tags from CSV</option>
+        </select>
+      </div>
+      <div>
+        <label>CSV file</label>
+        <input type="file" name="file" accept=".csv" required />
+      </div>
+      <button class="btn btn-primary" type="submit">Import Updates</button>
+    </form>
+  </div>
+
+  <p class="muted">
+    Safety: Import ignores qty_on_hand. Match rows by <b>id</b>. Don’t change the id column in Excel.
+  </p>
+</div>
+
+
+<form method="post" action="/resale/bulk-update" id="bulkForm">
+  <div class="card">
+    <h3>Bulk edit (applies to selected rows)</h3>
+
+    <div class="row">
+      <div>
+        <label>Status</label>
+        <select name="status">
+          <option value="">(no change)</option>
+          {% for opt in ['unlisted','listed','sold','donated','trashed'] %}
+            <option value="{{ opt }}">{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label>Channel</label>
+        <select name="channel">
+          <option value="">(no change)</option>
+          {% for opt in ['unassigned','ebay','etsy','shopify','local','mercari','whatnot'] %}
+            <option value="{{ opt }}">{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label>Location</label>
+        <input name="location" placeholder="(no change) e.g. Tote A3" />
+      </div>
+
+      <div>
+        <label>Append tags</label>
+        <input name="append_tags" placeholder="e.g. lego, starwars, hero" />
+      </div>
+
+      <div>
+        <label>Set unit cost ($ per each)</label>
+        <input type="number" step="0.01" name="unit_cost" placeholder="(no change)" />
+        <div class="muted">Applies the same unit cost to all selected items.</div>
+      </div>
+
+      <div style="align-self:end">
+        <button class="btn btn-primary" type="submit">Apply bulk changes</button>
+        <div class="muted">Select items in the table first.</div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:40px;">
+          <input type="checkbox" onclick="toggleAll(this)">
+        </th>
+        <th>Item</th>
+        <th>Qty</th>
+        <th>Cost</th>
+        <th>Status</th>
+        <th>Where</th>
+        <th>Adjust</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>
+          <input type="checkbox" name="item_id" value="{{ r['id'] }}">
+        </td>
+        <td>
+          <div><b>{{ r["name"] }}</b></div>
+          <div class="muted">SKU: {{ r["sku"] or "-" }} · {{ r["condition"] or "-" }}</div>
+          {% if r["tags"] %}<div class="muted">Tags: {{ r["tags"] }}</div>{% endif %}
+          {% if r["notes"] %}<div class="muted">Notes: {{ r["notes"] }}</div>{% endif %}
+        </td>
+        <td>{{ "%.2f"|format(r["qty_on_hand"]) }}</td>
+        <td>${{ "%.2f"|format(r["unit_cost"]) }} / each</td>
+        <td>
+          <span class="pill">{{ r["status"] }}</span>
+          <div class="muted">{{ r["channel"] }}</div>
+          {% if r["list_price"] %}<div class="muted">List: ${{ "%.2f"|format(r["list_price"]) }}</div>{% endif %}
+        </td>
+        <td>{{ r["location"] or "-" }}</td>
+        <td>
+          <form method="post" action="/resale/{{ r['id'] }}/adjust" style="display:flex; gap:8px;">
+            <input type="number" step="1" name="delta" value="1" style="width:90px;" />
+            <button class="btn" type="submit">Apply</button>
+          </form>
+          <div class="muted">Use -1 to deduct</div>
+        </td>
+        <td><a href="/resale/{{ r['id'] }}/edit">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</form>
+
+<script>
+function toggleAll(master) {
+  const boxes = document.querySelectorAll('input[name="item_id"]');
+  boxes.forEach(b => b.checked = master.checked);
+}
+</script>
+
+{% endblock %}
