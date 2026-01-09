@@ -135,9 +135,14 @@ def resale_list(request: Request, q: Optional[str] = None):
 
 @app.get("/resale/new", response_class=HTMLResponse)
 def resale_new_form(request: Request):
+    conn = get_conn()
+    codes = conn.execute(
+        "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
+    ).fetchall()
+    conn.close()
     return templates.TemplateResponse(
         "resale_form.html",
-        {"request": request, "mode": "new", "item": None},
+        {"request": request, "mode": "new", "item": None, "codes": codes},
     )
 
 
@@ -145,11 +150,9 @@ def resale_new_form(request: Request):
 def resale_create(
     company: str = Form("GV"),
     category: str = Form("Collectibles"),
-    brand: str = Form(""),
-    brand_code: str = Form(""),
+    brand_code: str = Form(...),     # REQUIRED - selected from dropdown
     ip: str = Form(""),
     name: str = Form(...),
-    sku: str = Form(""),
     qty_on_hand: float = Form(1),
     unit_cost: float = Form(0),
     location: str = Form(""),
@@ -161,11 +164,131 @@ def resale_create(
     list_price: Optional[float] = Form(None),
     url: str = Form(""),
 ):
+    """
+    Creates a resale item with auto-generated SKU:
+      SKU = {Company}-{BrandCode}-{Sequence}
+    SKU is not editable (A+A rule).
+    """
+    company_n = normalize_code(company) or "GV"
+    code = normalize_code(brand_code) or "MISC"
+
+    conn = get_conn()
+    with conn:
+        # Always generate SKU on create
+        sku_final = get_next_sku(conn, company_n, code)
+
+        cur = conn.execute(
+            """
+            INSERT INTO items (
+              item_type, company, category, brand_code, ip,
+              sku, name, unit, qty_on_hand, unit_cost,
+              location, condition, tags, notes
+            )
+            VALUES (
+              'resale', ?, ?, ?, ?,
+              ?, ?, 'each', ?, ?,
+              ?, ?, ?, ?
+            )
+            """,
+            (
+                company_n,
+                category.strip() or None,
+                code,
+                ip.strip() or None,
+                sku_final,
+                name.strip(),
+                qty_on_hand,
+                unit_cost,
+                location.strip() or None,
+                condition.strip() or None,
+                tags.strip() or None,
+                notes.strip() or None,
+            ),
+        )
+        item_id = cur.lastrowid
+
+        # Create listing row
+        conn.execute(
+            """
+            INSERT INTO resale_listings (item_id, channel, status, list_price, url)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                item_id,
+                (channel.strip() or "unassigned"),
+                (status.strip() or "unlisted"),
+                list_price,
+                (url.strip() or None),
+            ),
+        )
+
+    conn.close()
+    return RedirectResponse(url="/resale", status_code=303)
+
+@app.get("/config", response_class=HTMLResponse)
+def config_home(request: Request):
+    conn = get_conn()
+    codes = conn.execute(
+        "SELECT * FROM codes ORDER BY kind ASC, code ASC"
+    ).fetchall()
+    conn.close()
+    return templates.TemplateResponse("config.html", {"request": request, "codes": codes})
+
+
+@app.post("/config/codes/new")
+def config_code_create(
+    code: str = Form(...),
+    label: str = Form(...),
+    kind: str = Form("item"),
+):
+    code_n = normalize_code(code)
+    label_n = (label or "").strip()
+    kind_n = (kind or "item").strip()
+
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO codes(code, label, kind, is_active) VALUES (?,?,?,1)",
+            (code_n, label_n, kind_n),
+        )
+    conn.close()
+    return RedirectResponse(url="/config", status_code=303)
+
+
+@app.post("/config/codes/{code_id}/update")
+def config_code_update(
+    code_id: int,
+    label: str = Form(...),
+    kind: str = Form("item"),
+    is_active: int = Form(1),
+):
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            """
+            UPDATE codes
+            SET label=?, kind=?, is_active=?, updated_at=datetime('now')
+            WHERE id=?
+            """,
+            ((label or "").strip(), (kind or "item").strip(), 1 if int(is_active) == 1 else 0, code_id),
+        )
+    conn.close()
+    return RedirectResponse(url="/config", status_code=303)
+
+
+@app.post("/config/codes/{code_id}/delete")
+def config_code_delete(code_id: int):
+    conn = get_conn()
+    with conn:
+        conn.execute("DELETE FROM codes WHERE id=?", (code_id,))
+    conn.close()
+    return RedirectResponse(url="/config", status_code=303)
+
 
     conn = get_conn()
     with conn:
         company_n = normalize_code(company) or "GV"
-        code = normalize_code(brand_code) or normalize_code(brand) or "MISC"
+        code = normalize_code(brand_code) or "MISC"
         # If sku blank, generate it
         sku_final = (sku or "").strip()
         if not sku_final:
@@ -173,14 +296,13 @@ def resale_create(
 
             cur = conn.execute(
             """
-            INSERT INTO items (item_type, company, category, brand, brand_code, ip,
+            INSERT INTO items (item_type, company, category, brand_code, ip,
                                sku, name, unit, qty_on_hand, unit_cost, location, condition, tags, notes)
             VALUES ('resale', ?, ?, ?, ?, ?, ?, ?, 'each', ?, ?, ?, ?, ?, ?)
             """,
             (
                 company_n,
                 category.strip(),
-                (brand.strip() or None),
                 code,
                 (ip.strip() or None),
                 sku_final,
@@ -223,6 +345,10 @@ def resale_edit_form(request: Request, item_id: int):
         """,
         (item_id,),
     ).fetchone()
+    codes = conn.execute(
+        "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
+    ).fetchall()
+
     conn.close()
 
     if not item:
@@ -230,7 +356,7 @@ def resale_edit_form(request: Request, item_id: int):
 
     return templates.TemplateResponse(
         "resale_form.html",
-        {"request": request, "mode": "edit", "item": item},
+        {"request": request, "mode": "edit", "item": item, "codes": codes},
     )
 
 @app.post("/resale/{item_id}/edit")
@@ -238,7 +364,6 @@ def resale_update(
     item_id: int,
     company: str = Form("GV"),
     category: str = Form("Collectibles"),
-    brand: str = Form(""),
     brand_code: str = Form(""),
     ip: str = Form(""),
     name: str = Form(...),
@@ -254,17 +379,15 @@ def resale_update(
     url: str = Form(""),
 ):
     """
-    Updates an existing resale item. SKU is NOT editable and will never change here.
-    A+A rules:
-      - SKU auto-generated on create (handled elsewhere)
-      - SKU remains stable forever (this function never updates sku)
+    Updates an existing resale item.
+    SKU remains stable forever (NOT editable / NOT updated here).
+    SKU format: {Company}-{BrandCode}-{Sequence} (generated on create only).
     """
     company_n = normalize_code(company) or "GV"
-    code = normalize_code(brand_code) or normalize_code(brand) or "MISC"
+    code = normalize_code(brand_code) or "MISC"
 
     conn = get_conn()
     with conn:
-        # Ensure the item exists and is resale
         existing_item = conn.execute(
             "SELECT id, sku FROM items WHERE id=? AND item_type='resale'",
             (item_id,),
@@ -273,13 +396,12 @@ def resale_update(
             conn.close()
             return RedirectResponse(url="/resale", status_code=303)
 
-        # Update ITEMS (no sku update)
+        # Update ITEMS (no sku update, no brand field)
         conn.execute(
             """
             UPDATE items
             SET company=?,
                 category=?,
-                brand=?,
                 brand_code=?,
                 ip=?,
                 name=?,
@@ -294,9 +416,8 @@ def resale_update(
             (
                 company_n,
                 category.strip() or None,
-                (brand.strip() or None),
                 code,
-                (ip.strip() or None),
+                ip.strip() or None,
                 name.strip(),
                 qty_on_hand,
                 unit_cost,
@@ -342,6 +463,7 @@ def resale_update(
 
     conn.close()
     return RedirectResponse(url="/resale", status_code=303)
+
 
 
 @app.post("/resale/{item_id}/adjust")

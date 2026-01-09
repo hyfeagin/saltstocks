@@ -42,6 +42,42 @@ def migrate():
               PRIMARY KEY(company, code)
             )
             """)
+        # Create codes table (allowed Brand/Item codes)
+        if not table_exists(conn, "codes"):
+            conn.execute("""
+            CREATE TABLE codes (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL UNIQUE,     -- e.g., FUNKO, LEGO, SALT, OIL
+              label TEXT NOT NULL,           -- e.g., Funko, LEGO, Epsom Salt
+              kind TEXT NOT NULL DEFAULT 'item',  -- 'item' or 'material' (optional use later)
+              is_active INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_codes_kind ON codes(kind)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_codes_active ON codes(is_active)")
+
+        # Seed some starter codes if table is empty
+        existing_count = conn.execute("SELECT COUNT(*) FROM codes").fetchone()[0]
+        if existing_count == 0:
+            seed = [
+                ("FUNKO", "Funko", "item"),
+                ("LEGO", "LEGO", "item"),
+                ("NECA", "NECA", "item"),
+                ("HASBRO", "Hasbro", "item"),
+                ("MISC", "Misc", "item"),
+                ("SALT", "Epsom Salt", "material"),
+                ("OIL", "Fragrance Oil", "material"),
+                ("CTACID", "Citric Acid", "material"),
+                ("JAR", "Jar/Container", "material"),
+                ("LBL", "Label/Packaging", "material"),
+            ]
+            conn.executemany(
+                "INSERT OR IGNORE INTO codes(code, label, kind) VALUES (?,?,?)",
+                seed
+            )
 
         # Ensure SKU uniqueness if possible (existing duplicates would block this)
         # We'll try to add a unique index; if it fails, we won't crash.

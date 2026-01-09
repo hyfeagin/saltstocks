@@ -32,15 +32,17 @@
       </div>
 
       <div>
-        <label>Brand (optional)</label>
-        <input name="brand" value="{{ item['brand'] if item and item['brand'] else '' }}" placeholder="Funko, LEGO, NECA..." />
-        <div class="muted">If Brand Code is blank, we’ll derive it from Brand.</div>
-      </div>
-
-      <div>
-        <label>Brand Code / Item Code (optional)</label>
-        <input name="brand_code" value="{{ item['brand_code'] if item and item['brand_code'] else '' }}" placeholder="FUNKO, LEGO, NECA, SALT, OIL..." />
-        <div class="muted">This becomes the middle of the SKU. If blank, defaults to derived Brand or MISC.</div>
+        <label>Brand Code / Item Code</label>
+        {% set bc = (item["brand_code"] if item and item["brand_code"] else "MISC") %}
+        <select name="brand_code" required>
+          <option value="" disabled {{ 'selected' if bc=='' else '' }}>(select a code)</option>
+          {% for x in codes %}
+            <option value="{{ x['code'] }}" {{ 'selected' if bc==x['code'] else '' }}>
+              {{ x['label'] }} ({{ x['code'] }})
+            </option>
+          {% endfor %}
+        </select>
+        <div class="muted">This drives the middle of the SKU.</div>
       </div>
 
       <div>
@@ -50,7 +52,7 @@
 
       <div>
         <label>Name</label>
-        <input name="name" value="{{ item['name'] if item else '' }}" required placeholder="e.g., Funko Pop Captain America #123" />
+        <input name="name" value="{{ item['name'] if item else '' }}" required placeholder="e.g., Funko Pop Aquaman #123" />
       </div>
 
       <div>
@@ -75,7 +77,7 @@
 
       <div>
         <label>Tags</label>
-        <input name="tags" value="{{ item['tags'] if item else '' }}" placeholder="funko, marvel, con, hero" />
+        <input name="tags" value="{{ item['tags'] if item else '' }}" placeholder="funko, dc, hero" />
       </div>
 
       <div>

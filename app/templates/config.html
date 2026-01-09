@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Configurator</h1>
+<p class="muted">Manage the predefined Brand/Item codes used for SKU generation and dropdowns.</p>
+
+<div class="card">
+  <h3>Add new code</h3>
+  <form method="post" action="/config/codes/new" class="row">
+    <div>
+      <label>Code (used in SKU)</label>
+      <input name="code" placeholder="FUNKO" required />
+      <div class="muted">Uppercase recommended. No spaces. Example: FUNKO, LEGO, SALT.</div>
+    </div>
+
+    <div>
+      <label>Label (human-friendly)</label>
+      <input name="label" placeholder="Funko" required />
+    </div>
+
+    <div>
+      <label>Kind</label>
+      <select name="kind">
+        <option value="item" selected>item</option>
+        <option value="material">material</option>
+      </select>
+      <div class="muted">Material codes will be handy later for UM production.</div>
+    </div>
+
+    <div style="align-self:end">
+      <button class="btn btn-primary" type="submit">Add</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3>Existing codes</h3>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Code</th>
+        <th>Label</th>
+        <th>Kind</th>
+        <th>Active</th>
+        <th style="width:260px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in codes %}
+      <tr>
+        <td><code>{{ c["code"] }}</code></td>
+        <td>
+          <form method="post" action="/config/codes/{{ c['id'] }}/update" style="display:flex; gap:8px; align-items:center;">
+            <input name="label" value="{{ c['label'] }}" />
+        </td>
+        <td>
+            <select name="kind">
+              {% for opt in ['item','material'] %}
+                <option value="{{ opt }}" {{ 'selected' if c['kind']==opt else '' }}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+        </td>
+        <td>
+            <select name="is_active">
+              <option value="1" {{ 'selected' if c['is_active']==1 else '' }}>yes</option>
+              <option value="0" {{ 'selected' if c['is_active']==0 else '' }}>no</option>
+            </select>
+        </td>
+        <td>
+            <button class="btn" type="submit">Save</button>
+          </form>
+
+          <form method="post" action="/config/codes/{{ c['id'] }}/delete" style="display:inline;">
+            <button class="btn" type="submit" onclick="return confirm('Delete this code? This does not change existing SKUs, but you may lose dropdown options.')">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="muted">
+    Note: deleting or deactivating a code won’t change existing SKUs, but may remove it from dropdowns for new items.
+  </p>
+</div>
+{% endblock %}
