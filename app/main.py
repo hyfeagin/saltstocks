@@ -32,6 +32,7 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # - ANCHOR: RESALE_NEW_FORM_BEGIN/END - resale create form
 # - ANCHOR: RESALE_CREATE_DB_WRITE_BEGIN/END - create resale item + listing
 # - ANCHOR: CONFIG_CODES_CRUD_BEGIN/END - config codes list/create/update/delete
+# - ANCHOR: CONFIG_CATEGORIES_CRUD_BEGIN/END - config categories list/create/update/toggle
 # - ANCHOR: RESALE_EDIT_FORM_BEGIN/END - resale edit form
 # - ANCHOR: RESALE_UPDATE_DB_WRITE_BEGIN/END - update resale item + listing
 # - ANCHOR: RESALE_ADJUST_QTY_BEGIN/END - adjust resale quantity
@@ -188,10 +189,13 @@ def resale_new_form(request: Request):
     codes = conn.execute(
         "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
     ).fetchall()
+    categories = conn.execute(
+        "SELECT name, is_active FROM categories WHERE is_active=1 ORDER BY name ASC"
+    ).fetchall()
     conn.close()
     return templates.TemplateResponse(
         "resale_form.html",
-        {"request": request, "mode": "new", "item": None, "codes": codes},
+        {"request": request, "mode": "new", "item": None, "codes": codes, "categories": categories},
     )
 # =========================
 # ANCHOR: RESALE_NEW_FORM_END
@@ -294,8 +298,14 @@ def config_home(request: Request):
     codes = conn.execute(
         "SELECT * FROM codes ORDER BY kind ASC, code ASC"
     ).fetchall()
+    categories = conn.execute(
+        "SELECT * FROM categories ORDER BY name ASC"
+    ).fetchall()
     conn.close()
-    return templates.TemplateResponse("config.html", {"request": request, "codes": codes})
+    return templates.TemplateResponse(
+        "config.html",
+        {"request": request, "codes": codes, "categories": categories},
+    )
 
 
 @app.post("/config/codes/new")
@@ -348,6 +358,65 @@ def config_code_delete(code_id: int):
     return RedirectResponse(url="/config", status_code=303)
 # =========================
 # ANCHOR: CONFIG_CODES_CRUD_END
+# =========================
+
+# =========================
+# ANCHOR: CONFIG_CATEGORIES_CRUD_BEGIN
+# (List/create/update/toggle config categories)
+# =========================
+@app.post("/config/categories/new")
+def config_category_create(name: str = Form(...)):
+    name_n = (name or "").strip()
+    if not name_n:
+        return RedirectResponse(url="/config", status_code=303)
+
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO categories(name, is_active) VALUES (?, 1)",
+            (name_n,),
+        )
+    conn.close()
+    return RedirectResponse(url="/config", status_code=303)
+
+
+@app.post("/config/categories/{category_id}/update")
+def config_category_update(category_id: int, name: str = Form(...)):
+    name_n = (name or "").strip()
+    if not name_n:
+        return RedirectResponse(url="/config", status_code=303)
+
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            """
+            UPDATE categories
+            SET name=?, updated_at=datetime('now')
+            WHERE id=?
+            """,
+            (name_n, category_id),
+        )
+    conn.close()
+    return RedirectResponse(url="/config", status_code=303)
+
+
+@app.post("/config/categories/{category_id}/toggle")
+def config_category_toggle(category_id: int):
+    conn = get_conn()
+    with conn:
+        conn.execute(
+            """
+            UPDATE categories
+            SET is_active = CASE WHEN is_active=1 THEN 0 ELSE 1 END,
+                updated_at=datetime('now')
+            WHERE id=?
+            """,
+            (category_id,),
+        )
+    conn.close()
+    return RedirectResponse(url="/config", status_code=303)
+# =========================
+# ANCHOR: CONFIG_CATEGORIES_CRUD_END
 # =========================
 
 
@@ -418,15 +487,23 @@ def resale_edit_form(request: Request, item_id: int):
     codes = conn.execute(
         "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
     ).fetchall()
+    categories = conn.execute(
+        "SELECT name, is_active FROM categories WHERE is_active=1 OR name=? ORDER BY name ASC",
+        (item["category"] if item else "",),
+    ).fetchall()
 
     conn.close()
 
     if not item:
         return RedirectResponse(url="/resale", status_code=303)
 
+    if item["category"] and not any(c["name"] == item["category"] for c in categories):
+        categories = list(categories)
+        categories.append({"name": item["category"], "is_active": 0})
+
     return templates.TemplateResponse(
         "resale_form.html",
-        {"request": request, "mode": "edit", "item": item, "codes": codes},
+        {"request": request, "mode": "edit", "item": item, "codes": codes, "categories": categories},
     )
 # =========================
 # ANCHOR: RESALE_EDIT_FORM_END

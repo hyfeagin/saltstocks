@@ -23,10 +23,18 @@
 
       <div>
         <label>Category</label>
-        {% set cat = (item["category"] if item and item["category"] else "Collectibles") %}
+        {% if item and item["category"] %}
+          {% set cat = item["category"] %}
+        {% elif categories and categories|length > 0 %}
+          {% set cat = categories[0]["name"] %}
+        {% else %}
+          {% set cat = "Collectibles" %}
+        {% endif %}
         <select name="category">
-          {% for opt in ['Soap/Bath & Beauty','Books/Media','Decor','Collectibles','Toys','Clothing'] %}
-            <option value="{{ opt }}" {{ 'selected' if cat==opt else '' }}>{{ opt }}</option>
+          {% for opt in categories %}
+            <option value="{{ opt['name'] }}" {{ 'selected' if cat==opt['name'] else '' }}>
+              {{ opt['name'] }}{{ ' (inactive)' if opt['is_active']==0 else '' }}
+            </option>
           {% endfor %}
         </select>
       </div>
