@@ -23,6 +23,23 @@ BACKUP_DIR = BASE_DIR / "data" / "backups"
 app = FastAPI(title="Salt Stocks")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
+# ==========================================================
+# ANCHOR INDEX (search "ANCHOR:" to jump)
+# - ANCHOR: STARTUP_INIT_DB_BEGIN/END - initialize DB and backups
+# - ANCHOR: DASHBOARD_VIEW_BEGIN/END - dashboard counts + summary view
+# - ANCHOR: BACKUP_NOW_BEGIN/END - create timestamped DB backup
+# - ANCHOR: RESALE_LIST_VIEW_BEGIN/END - list/search resale inventory
+# - ANCHOR: RESALE_NEW_FORM_BEGIN/END - resale create form
+# - ANCHOR: RESALE_CREATE_DB_WRITE_BEGIN/END - create resale item + listing
+# - ANCHOR: CONFIG_CODES_CRUD_BEGIN/END - config codes list/create/update/delete
+# - ANCHOR: RESALE_EDIT_FORM_BEGIN/END - resale edit form
+# - ANCHOR: RESALE_UPDATE_DB_WRITE_BEGIN/END - update resale item + listing
+# - ANCHOR: RESALE_ADJUST_QTY_BEGIN/END - adjust resale quantity
+# - ANCHOR: RESALE_BULK_UPDATE_BEGIN/END - bulk update resale items/listings
+# - ANCHOR: RESALE_EXPORT_CSV_BEGIN/END - export resale CSV
+# - ANCHOR: RESALE_IMPORT_CSV_BEGIN/END - import resale CSV updates
+# ==========================================================
+
 def normalize_code(s: str) -> str:
     s = (s or "").strip().upper()
     s = s.replace(" ", "").replace("-", "").replace("_", "")
@@ -56,12 +73,23 @@ def get_next_sku(conn, company: str, code: str) -> str:
     return f"{company}-{code}-{next_seq:06d}"
 
 
+# =========================
+# ANCHOR: STARTUP_INIT_DB_BEGIN
+# (Initialize database and backup directory on startup)
+# =========================
 @app.on_event("startup")
 def _startup():
     init_db()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+# =========================
+# ANCHOR: STARTUP_INIT_DB_END
+# =========================
 
 
+# =========================
+# ANCHOR: DASHBOARD_VIEW_BEGIN
+# (Dashboard counts for resale inventory status)
+# =========================
 @app.get("/", response_class=HTMLResponse)
 def dashboard(request: Request):
     conn = get_conn()
@@ -89,8 +117,15 @@ def dashboard(request: Request):
         "dashboard.html",
         {"request": request, "resale_count": resale_count, "unlisted": unlisted, "low_qty": low_qty},
     )
+# =========================
+# ANCHOR: DASHBOARD_VIEW_END
+# =========================
 
 
+# =========================
+# ANCHOR: BACKUP_NOW_BEGIN
+# (Create a timestamped database backup)
+# =========================
 @app.post("/backup")
 def backup_now():
     # Make a timestamped copy of the SQLite file
@@ -99,8 +134,15 @@ def backup_now():
     if DB_PATH.exists():
         shutil.copy2(DB_PATH, dest)
     return RedirectResponse(url="/", status_code=303)
+# =========================
+# ANCHOR: BACKUP_NOW_END
+# =========================
 
 
+# =========================
+# ANCHOR: RESALE_LIST_VIEW_BEGIN
+# (List and search resale inventory)
+# =========================
 @app.get("/resale", response_class=HTMLResponse)
 def resale_list(request: Request, q: Optional[str] = None):
     conn = get_conn()
@@ -131,8 +173,15 @@ def resale_list(request: Request, q: Optional[str] = None):
         "resale_list.html",
         {"request": request, "rows": rows, "q": q or ""},
     )
+# =========================
+# ANCHOR: RESALE_LIST_VIEW_END
+# =========================
 
 
+# =========================
+# ANCHOR: RESALE_NEW_FORM_BEGIN
+# (Render the resale item creation form)
+# =========================
 @app.get("/resale/new", response_class=HTMLResponse)
 def resale_new_form(request: Request):
     conn = get_conn()
@@ -144,8 +193,15 @@ def resale_new_form(request: Request):
         "resale_form.html",
         {"request": request, "mode": "new", "item": None, "codes": codes},
     )
+# =========================
+# ANCHOR: RESALE_NEW_FORM_END
+# =========================
 
 
+# =========================
+# ANCHOR: RESALE_CREATE_DB_WRITE_BEGIN
+# (Create resale item and listing rows)
+# =========================
 @app.post("/resale/new")
 def resale_create(
     company: str = Form("GV"),
@@ -224,7 +280,14 @@ def resale_create(
 
     conn.close()
     return RedirectResponse(url="/resale", status_code=303)
+# =========================
+# ANCHOR: RESALE_CREATE_DB_WRITE_END
+# =========================
 
+# =========================
+# ANCHOR: CONFIG_CODES_CRUD_BEGIN
+# (List/create/update/delete config codes)
+# =========================
 @app.get("/config", response_class=HTMLResponse)
 def config_home(request: Request):
     conn = get_conn()
@@ -283,6 +346,9 @@ def config_code_delete(code_id: int):
         conn.execute("DELETE FROM codes WHERE id=?", (code_id,))
     conn.close()
     return RedirectResponse(url="/config", status_code=303)
+# =========================
+# ANCHOR: CONFIG_CODES_CRUD_END
+# =========================
 
 
     conn = get_conn()
@@ -328,6 +394,10 @@ def config_code_delete(code_id: int):
     return RedirectResponse(url="/resale", status_code=303)
 
 
+# =========================
+# ANCHOR: RESALE_EDIT_FORM_BEGIN
+# (Render resale item edit form)
+# =========================
 @app.get("/resale/{item_id}/edit", response_class=HTMLResponse)
 def resale_edit_form(request: Request, item_id: int):
     conn = get_conn()
@@ -358,7 +428,14 @@ def resale_edit_form(request: Request, item_id: int):
         "resale_form.html",
         {"request": request, "mode": "edit", "item": item, "codes": codes},
     )
+# =========================
+# ANCHOR: RESALE_EDIT_FORM_END
+# =========================
 
+# =========================
+# ANCHOR: RESALE_UPDATE_DB_WRITE_BEGIN
+# (Update resale item and listing rows)
+# =========================
 @app.post("/resale/{item_id}/edit")
 def resale_update(
     item_id: int,
@@ -463,9 +540,16 @@ def resale_update(
 
     conn.close()
     return RedirectResponse(url="/resale", status_code=303)
+# =========================
+# ANCHOR: RESALE_UPDATE_DB_WRITE_END
+# =========================
 
 
 
+# =========================
+# ANCHOR: RESALE_ADJUST_QTY_BEGIN
+# (Adjust resale item quantity on hand)
+# =========================
 @app.post("/resale/{item_id}/adjust")
 def resale_adjust_qty(item_id: int, delta: float = Form(...)):
     conn = get_conn()
@@ -480,7 +564,14 @@ def resale_adjust_qty(item_id: int, delta: float = Form(...)):
         )
     conn.close()
     return RedirectResponse(url="/resale", status_code=303)
+# =========================
+# ANCHOR: RESALE_ADJUST_QTY_END
+# =========================
 
+# =========================
+# ANCHOR: RESALE_BULK_UPDATE_BEGIN
+# (Bulk update resale items and listings)
+# =========================
 @app.post("/resale/bulk-update")
 def resale_bulk_update(
     item_id: List[int] = Form([]),
@@ -578,7 +669,14 @@ def resale_bulk_update(
 
     conn.close()
     return RedirectResponse(url="/resale", status_code=303)
+# =========================
+# ANCHOR: RESALE_BULK_UPDATE_END
+# =========================
 
+# =========================
+# ANCHOR: RESALE_EXPORT_CSV_BEGIN
+# (Export resale inventory to CSV)
+# =========================
 @app.get("/resale/export")
 def resale_export_csv():
     conn = get_conn()
@@ -637,8 +735,15 @@ def resale_export_csv():
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+# =========================
+# ANCHOR: RESALE_EXPORT_CSV_END
+# =========================
 
 
+# =========================
+# ANCHOR: RESALE_IMPORT_CSV_BEGIN
+# (Import resale inventory updates from CSV)
+# =========================
 @app.post("/resale/import")
 async def resale_import_csv(
     file: UploadFile = File(...),
@@ -791,4 +896,6 @@ async def resale_import_csv(
 
     conn.close()
     return RedirectResponse(url="/resale", status_code=303)
-
+# =========================
+# ANCHOR: RESALE_IMPORT_CSV_END
+# =========================
