@@ -4,6 +4,51 @@
 <p class="muted">Manage the predefined Brand/Item codes used for SKU generation and dropdowns.</p>
 
 <div class="card">
+  <h3>Categories</h3>
+  <p class="muted">Use these categories for resale item classification.</p>
+
+  <form method="post" action="/config/categories/new" class="row">
+    <div>
+      <label>New category name</label>
+      <input name="name" placeholder="Collectibles" required />
+    </div>
+    <div style="align-self:end">
+      <button class="btn btn-primary" type="submit">Add Category</button>
+    </div>
+  </form>
+
+  <table style="margin-top:12px;">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Status</th>
+        <th style="width:240px;">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for cat in categories %}
+      <tr>
+        <td>
+          <form method="post" action="/config/categories/{{ cat['id'] }}/update" style="display:flex; gap:8px; align-items:center;">
+            <input name="name" value="{{ cat['name'] }}" />
+        </td>
+        <td>{{ 'Active' if cat['is_active']==1 else 'Inactive' }}</td>
+        <td>
+            <button class="btn" type="submit">Save</button>
+          </form>
+          <form method="post" action="/config/categories/{{ cat['id'] }}/toggle" style="display:inline;">
+            <button class="btn" type="submit">
+              {{ 'Deactivate' if cat['is_active']==1 else 'Reactivate' }}
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
   <h3>Add new code</h3>
   <form method="post" action="/config/codes/new" class="row">
     <div>

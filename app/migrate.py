@@ -73,6 +73,18 @@ def migrate():
             conn.execute("CREATE INDEX IF NOT EXISTS idx_codes_kind ON codes(kind)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_codes_active ON codes(is_active)")
 
+        # Create categories table
+        if not table_exists(conn, "categories"):
+            conn.execute("""
+            CREATE TABLE categories (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL UNIQUE,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              created_at TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
         # Seed some starter codes if table is empty
         existing_count = conn.execute("SELECT COUNT(*) FROM codes").fetchone()[0]
         if existing_count == 0:
@@ -91,6 +103,22 @@ def migrate():
             conn.executemany(
                 "INSERT OR IGNORE INTO codes(code, label, kind) VALUES (?,?,?)",
                 seed
+            )
+
+        # Seed categories if table is empty
+        category_count = conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+        if category_count == 0:
+            category_seed = [
+                ("Collectibles",),
+                ("Toys",),
+                ("Decor",),
+                ("Books/Media",),
+                ("Clothing",),
+                ("Soap/Bath & Beauty",),
+            ]
+            conn.executemany(
+                "INSERT OR IGNORE INTO categories(name) VALUES (?)",
+                category_seed,
             )
 
         # Ensure SKU uniqueness if possible (existing duplicates would block this)
