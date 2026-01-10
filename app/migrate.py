@@ -1,3 +1,17 @@
+
+
+##  Inline Comment for `migrate.py`
+
+##Add this near the top of `app/migrate.py` so Future Holly sees it **before** she forgets:
+
+#```python
+# IMPORTANT:
+# Any schema or seed change requires running:
+#   source .venv/bin/activate
+#   python app/migrate.py
+#
+# If UI looks broken after pulling code, this is the first thing to run.
+
 from __future__ import annotations
 import sqlite3
 from pathlib import Path
