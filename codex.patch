@@ -1,0 +1,670 @@
+diff --git a/app/main.py b/app/main.py
+index 455b93358c8efd5ac77aa2f587da2137182aea14..adafdfb19d03e44c08972ff36822f2030e557ffc 100644
+--- a/app/main.py
++++ b/app/main.py
+@@ -1,173 +1,229 @@
+ from __future__ import annotations
+
+ import shutil
+ from datetime import datetime
+ from pathlib import Path
+ from typing import Optional, List
+ import csv
+ import io
+ from fastapi import UploadFile, File
+ from fastapi.responses import StreamingResponse
+
+
+ from fastapi import FastAPI, Form, Request
+ from fastapi.responses import HTMLResponse, RedirectResponse
+ from fastapi.templating import Jinja2Templates
+
+ from .db import get_conn, init_db, DB_PATH
+
+ BASE_DIR = Path(__file__).resolve().parent.parent
+ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
+ BACKUP_DIR = BASE_DIR / "data" / "backups"
+
+ app = FastAPI(title="Salt Stocks")
+ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
++# ==========================================================
++# ANCHOR INDEX (search "ANCHOR:" to jump)
++# - ANCHOR: STARTUP_INIT_DB_BEGIN/END - initialize DB and backups
++# - ANCHOR: DASHBOARD_VIEW_BEGIN/END - dashboard counts + summary view
++# - ANCHOR: BACKUP_NOW_BEGIN/END - create timestamped DB backup
++# - ANCHOR: RESALE_LIST_VIEW_BEGIN/END - list/search resale inventory
++# - ANCHOR: RESALE_NEW_FORM_BEGIN/END - resale create form
++# - ANCHOR: RESALE_CREATE_DB_WRITE_BEGIN/END - create resale item + listing
++# - ANCHOR: CONFIG_CODES_CRUD_BEGIN/END - config codes list/create/update/delete
++# - ANCHOR: RESALE_EDIT_FORM_BEGIN/END - resale edit form
++# - ANCHOR: RESALE_UPDATE_DB_WRITE_BEGIN/END - update resale item + listing
++# - ANCHOR: RESALE_ADJUST_QTY_BEGIN/END - adjust resale quantity
++# - ANCHOR: RESALE_BULK_UPDATE_BEGIN/END - bulk update resale items/listings
++# - ANCHOR: RESALE_EXPORT_CSV_BEGIN/END - export resale CSV
++# - ANCHOR: RESALE_IMPORT_CSV_BEGIN/END - import resale CSV updates
++# ==========================================================
++
+ def normalize_code(s: str) -> str:
+     s = (s or "").strip().upper()
+     s = s.replace(" ", "").replace("-", "").replace("_", "")
+     return s
+
+ def get_next_sku(conn, company: str, code: str) -> str:
+     company = normalize_code(company)
+     code = normalize_code(code)
+     if not company or not code:
+         raise ValueError("company and code required for SKU generation")
+
+     row = conn.execute(
+         "SELECT next_seq FROM sku_counters WHERE company=? AND code=?",
+         (company, code),
+     ).fetchone()
+
+     if row is None:
+         # initialize counter
+         next_seq = 1
+         conn.execute(
+             "INSERT INTO sku_counters(company, code, next_seq) VALUES(?,?,?)",
+             (company, code, 2),
+         )
+     else:
+         next_seq = int(row["next_seq"])
+         conn.execute(
+             "UPDATE sku_counters SET next_seq=? WHERE company=? AND code=?",
+             (next_seq + 1, company, code),
+         )
+
+     return f"{company}-{code}-{next_seq:06d}"
+
+
++# =========================
++# ANCHOR: STARTUP_INIT_DB_BEGIN
++# (Initialize database and backup directory on startup)
++# =========================
+ @app.on_event("startup")
+ def _startup():
+     init_db()
+     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
++# =========================
++# ANCHOR: STARTUP_INIT_DB_END
++# =========================
+
+
++# =========================
++# ANCHOR: DASHBOARD_VIEW_BEGIN
++# (Dashboard counts for resale inventory status)
++# =========================
+ @app.get("/", response_class=HTMLResponse)
+ def dashboard(request: Request):
+     conn = get_conn()
+     resale_count = conn.execute(
+         "SELECT COUNT(*) AS c FROM items WHERE item_type='resale'"
+     ).fetchone()["c"]
+     unlisted = conn.execute(
+         """
+         SELECT COUNT(*) AS c
+         FROM items i
+         LEFT JOIN resale_listings rl ON rl.item_id = i.id
+         WHERE i.item_type='resale'
+           AND COALESCE(rl.status,'unlisted') = 'unlisted'
+         """
+     ).fetchone()["c"]
+     low_qty = conn.execute(
+         """
+         SELECT COUNT(*) AS c
+         FROM items
+         WHERE item_type='resale' AND qty_on_hand <= 0
+         """
+     ).fetchone()["c"]
+     conn.close()
+     return templates.TemplateResponse(
+         "dashboard.html",
+         {"request": request, "resale_count": resale_count, "unlisted": unlisted, "low_qty": low_qty},
+     )
++# =========================
++# ANCHOR: DASHBOARD_VIEW_END
++# =========================
+
+
++# =========================
++# ANCHOR: BACKUP_NOW_BEGIN
++# (Create a timestamped database backup)
++# =========================
+ @app.post("/backup")
+ def backup_now():
+     # Make a timestamped copy of the SQLite file
+     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+     dest = BACKUP_DIR / f"saltstocks_{ts}.db"
+     if DB_PATH.exists():
+         shutil.copy2(DB_PATH, dest)
+     return RedirectResponse(url="/", status_code=303)
++# =========================
++# ANCHOR: BACKUP_NOW_END
++# =========================
+
+
++# =========================
++# ANCHOR: RESALE_LIST_VIEW_BEGIN
++# (List and search resale inventory)
++# =========================
+ @app.get("/resale", response_class=HTMLResponse)
+ def resale_list(request: Request, q: Optional[str] = None):
+     conn = get_conn()
+     params = {}
+     where = "WHERE i.item_type='resale'"
+     if q:
+         where += " AND (i.name LIKE :q OR i.sku LIKE :q OR i.tags LIKE :q)"
+         params["q"] = f"%{q}%"
+
+     rows = conn.execute(
+         f"""
+         SELECT
+           i.*,
+           COALESCE(rl.status, 'unlisted') AS status,
+           COALESCE(rl.channel, 'unassigned') AS channel,
+           rl.list_price,
+           rl.url
+         FROM items i
+         LEFT JOIN resale_listings rl ON rl.item_id = i.id
+         {where}
+         ORDER BY i.updated_at DESC
+         """,
+         params,
+     ).fetchall()
+     conn.close()
+
+     return templates.TemplateResponse(
+         "resale_list.html",
+         {"request": request, "rows": rows, "q": q or ""},
+     )
++# =========================
++# ANCHOR: RESALE_LIST_VIEW_END
++# =========================
+
+
++# =========================
++# ANCHOR: RESALE_NEW_FORM_BEGIN
++# (Render the resale item creation form)
++# =========================
+ @app.get("/resale/new", response_class=HTMLResponse)
+ def resale_new_form(request: Request):
+     conn = get_conn()
+     codes = conn.execute(
+         "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
+     ).fetchall()
+     conn.close()
+     return templates.TemplateResponse(
+         "resale_form.html",
+         {"request": request, "mode": "new", "item": None, "codes": codes},
+     )
++# =========================
++# ANCHOR: RESALE_NEW_FORM_END
++# =========================
+
+
++# =========================
++# ANCHOR: RESALE_CREATE_DB_WRITE_BEGIN
++# (Create resale item and listing rows)
++# =========================
+ @app.post("/resale/new")
+ def resale_create(
+     company: str = Form("GV"),
+     category: str = Form("Collectibles"),
+     brand_code: str = Form(...),     # REQUIRED - selected from dropdown
+     ip: str = Form(""),
+     name: str = Form(...),
+     qty_on_hand: float = Form(1),
+     unit_cost: float = Form(0),
+     location: str = Form(""),
+     condition: str = Form(""),
+     tags: str = Form(""),
+     notes: str = Form(""),
+     status: str = Form("unlisted"),
+     channel: str = Form("unassigned"),
+     list_price: Optional[float] = Form(None),
+     url: str = Form(""),
+ ):
+     """
+     Creates a resale item with auto-generated SKU:
+       SKU = {Company}-{BrandCode}-{Sequence}
+     SKU is not editable (A+A rule).
+     """
+     company_n = normalize_code(company) or "GV"
+     code = normalize_code(brand_code) or "MISC"
+@@ -202,51 +258,58 @@ def resale_create(
+                 location.strip() or None,
+                 condition.strip() or None,
+                 tags.strip() or None,
+                 notes.strip() or None,
+             ),
+         )
+         item_id = cur.lastrowid
+
+         # Create listing row
+         conn.execute(
+             """
+             INSERT INTO resale_listings (item_id, channel, status, list_price, url)
+             VALUES (?, ?, ?, ?, ?)
+             """,
+             (
+                 item_id,
+                 (channel.strip() or "unassigned"),
+                 (status.strip() or "unlisted"),
+                 list_price,
+                 (url.strip() or None),
+             ),
+         )
+
+     conn.close()
+     return RedirectResponse(url="/resale", status_code=303)
+-
++# =========================
++# ANCHOR: RESALE_CREATE_DB_WRITE_END
++# =========================
++
++# =========================
++# ANCHOR: CONFIG_CODES_CRUD_BEGIN
++# (List/create/update/delete config codes)
++# =========================
+ @app.get("/config", response_class=HTMLResponse)
+ def config_home(request: Request):
+     conn = get_conn()
+     codes = conn.execute(
+         "SELECT * FROM codes ORDER BY kind ASC, code ASC"
+     ).fetchall()
+     conn.close()
+     return templates.TemplateResponse("config.html", {"request": request, "codes": codes})
+
+
+ @app.post("/config/codes/new")
+ def config_code_create(
+     code: str = Form(...),
+     label: str = Form(...),
+     kind: str = Form("item"),
+ ):
+     code_n = normalize_code(code)
+     label_n = (label or "").strip()
+     kind_n = (kind or "item").strip()
+
+     conn = get_conn()
+     with conn:
+         conn.execute(
+             "INSERT OR IGNORE INTO codes(code, label, kind, is_active) VALUES (?,?,?,1)",
+             (code_n, label_n, kind_n),
+@@ -261,126 +324,140 @@ def config_code_update(
+     label: str = Form(...),
+     kind: str = Form("item"),
+     is_active: int = Form(1),
+ ):
+     conn = get_conn()
+     with conn:
+         conn.execute(
+             """
+             UPDATE codes
+             SET label=?, kind=?, is_active=?, updated_at=datetime('now')
+             WHERE id=?
+             """,
+             ((label or "").strip(), (kind or "item").strip(), 1 if int(is_active) == 1 else 0, code_id),
+         )
+     conn.close()
+     return RedirectResponse(url="/config", status_code=303)
+
+
+ @app.post("/config/codes/{code_id}/delete")
+ def config_code_delete(code_id: int):
+     conn = get_conn()
+     with conn:
+         conn.execute("DELETE FROM codes WHERE id=?", (code_id,))
+     conn.close()
+     return RedirectResponse(url="/config", status_code=303)
++# =========================
++# ANCHOR: CONFIG_CODES_CRUD_END
++# =========================
+
+
+     conn = get_conn()
+     with conn:
+         company_n = normalize_code(company) or "GV"
+         code = normalize_code(brand_code) or "MISC"
+         # If sku blank, generate it
+         sku_final = (sku or "").strip()
+         if not sku_final:
+             sku_final = get_next_sku(conn, company_n, code)
+
+             cur = conn.execute(
+             """
+             INSERT INTO items (item_type, company, category, brand_code, ip,
+                                sku, name, unit, qty_on_hand, unit_cost, location, condition, tags, notes)
+             VALUES ('resale', ?, ?, ?, ?, ?, ?, ?, 'each', ?, ?, ?, ?, ?, ?)
+             """,
+             (
+                 company_n,
+                 category.strip(),
+                 code,
+                 (ip.strip() or None),
+                 sku_final,
+                 name.strip(),
+                 qty_on_hand,
+                 unit_cost,
+                 location.strip(),
+                 condition.strip(),
+                 tags.strip(),
+                 notes.strip(),
+             ),
+         )
+
+         item_id = cur.lastrowid
+         conn.execute(
+             """
+             INSERT INTO resale_listings (item_id, channel, status, list_price, url)
+             VALUES (?, ?, ?, ?, ?)
+             """,
+             (item_id, channel.strip(), status.strip(), list_price, url.strip() or None),
+         )
+     conn.close()
+     return RedirectResponse(url="/resale", status_code=303)
+
+
++# =========================
++# ANCHOR: RESALE_EDIT_FORM_BEGIN
++# (Render resale item edit form)
++# =========================
+ @app.get("/resale/{item_id}/edit", response_class=HTMLResponse)
+ def resale_edit_form(request: Request, item_id: int):
+     conn = get_conn()
+     item = conn.execute(
+         """
+         SELECT
+           i.*,
+           COALESCE(rl.status, 'unlisted') AS status,
+           COALESCE(rl.channel, 'unassigned') AS channel,
+           rl.list_price,
+           rl.url
+         FROM items i
+         LEFT JOIN resale_listings rl ON rl.item_id = i.id
+         WHERE i.id = ? AND i.item_type='resale'
+         """,
+         (item_id,),
+     ).fetchone()
+     codes = conn.execute(
+         "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
+     ).fetchall()
+
+     conn.close()
+
+     if not item:
+         return RedirectResponse(url="/resale", status_code=303)
+
+     return templates.TemplateResponse(
+         "resale_form.html",
+         {"request": request, "mode": "edit", "item": item, "codes": codes},
+     )
+-
++# =========================
++# ANCHOR: RESALE_EDIT_FORM_END
++# =========================
++
++# =========================
++# ANCHOR: RESALE_UPDATE_DB_WRITE_BEGIN
++# (Update resale item and listing rows)
++# =========================
+ @app.post("/resale/{item_id}/edit")
+ def resale_update(
+     item_id: int,
+     company: str = Form("GV"),
+     category: str = Form("Collectibles"),
+     brand_code: str = Form(""),
+     ip: str = Form(""),
+     name: str = Form(...),
+     qty_on_hand: float = Form(1),
+     unit_cost: float = Form(0),
+     location: str = Form(""),
+     condition: str = Form(""),
+     tags: str = Form(""),
+     notes: str = Form(""),
+     status: str = Form("unlisted"),
+     channel: str = Form("unassigned"),
+     list_price: Optional[float] = Form(None),
+     url: str = Form(""),
+ ):
+     """
+     Updates an existing resale item.
+     SKU remains stable forever (NOT editable / NOT updated here).
+     SKU format: {Company}-{BrandCode}-{Sequence} (generated on create only).
+     """
+     company_n = normalize_code(company) or "GV"
+@@ -441,68 +518,82 @@ def resale_update(
+
+         if existing_listing:
+             conn.execute(
+                 """
+                 UPDATE resale_listings
+                 SET channel=?,
+                     status=?,
+                     list_price=?,
+                     url=?,
+                     updated_at=datetime('now')
+                 WHERE item_id=?
+                 """,
+                 (channel_v, status_v, list_price, url_v, item_id),
+             )
+         else:
+             conn.execute(
+                 """
+                 INSERT INTO resale_listings (item_id, channel, status, list_price, url)
+                 VALUES (?, ?, ?, ?, ?)
+                 """,
+                 (item_id, channel_v, status_v, list_price, url_v),
+             )
+
+     conn.close()
+     return RedirectResponse(url="/resale", status_code=303)
++# =========================
++# ANCHOR: RESALE_UPDATE_DB_WRITE_END
++# =========================
+
+
+
++# =========================
++# ANCHOR: RESALE_ADJUST_QTY_BEGIN
++# (Adjust resale item quantity on hand)
++# =========================
+ @app.post("/resale/{item_id}/adjust")
+ def resale_adjust_qty(item_id: int, delta: float = Form(...)):
+     conn = get_conn()
+     with conn:
+         conn.execute(
+             """
+             UPDATE items
+             SET qty_on_hand = qty_on_hand + ?
+             WHERE id = ? AND item_type='resale'
+             """,
+             (delta, item_id),
+         )
+     conn.close()
+     return RedirectResponse(url="/resale", status_code=303)
+-
++# =========================
++# ANCHOR: RESALE_ADJUST_QTY_END
++# =========================
++
++# =========================
++# ANCHOR: RESALE_BULK_UPDATE_BEGIN
++# (Bulk update resale items and listings)
++# =========================
+ @app.post("/resale/bulk-update")
+ def resale_bulk_update(
+     item_id: List[int] = Form([]),
+     status: str = Form(""),
+     channel: str = Form(""),
+     location: str = Form(""),
+     append_tags: str = Form(""),
+     unit_cost: str = Form(""),
+ ):
+     # If nothing selected, just bounce back
+     if not item_id:
+         return RedirectResponse(url="/resale", status_code=303)
+
+     status = status.strip()
+     channel = channel.strip()
+     location = location.strip()
+     append_tags = append_tags.strip()
+
+     # unit_cost: allow blank = no change
+     unit_cost_value = None
+     unit_cost = unit_cost.strip()
+     if unit_cost:
+         try:
+             unit_cost_value = float(unit_cost)
+         except ValueError:
+@@ -556,51 +647,58 @@ def resale_bulk_update(
+                             (status, channel, i),
+                         )
+                     elif status:
+                         conn.execute(
+                             """UPDATE resale_listings
+                                SET status=?, updated_at=datetime('now')
+                                WHERE item_id=?""",
+                             (status, i),
+                         )
+                     elif channel:
+                         conn.execute(
+                             """UPDATE resale_listings
+                                SET channel=?, updated_at=datetime('now')
+                                WHERE item_id=?""",
+                             (channel, i),
+                         )
+                 else:
+                     conn.execute(
+                         """INSERT INTO resale_listings (item_id, channel, status)
+                            VALUES (?, ?, ?)""",
+                         (i, channel or "unassigned", status or "unlisted"),
+                     )
+
+     conn.close()
+     return RedirectResponse(url="/resale", status_code=303)
+-
++# =========================
++# ANCHOR: RESALE_BULK_UPDATE_END
++# =========================
++
++# =========================
++# ANCHOR: RESALE_EXPORT_CSV_BEGIN
++# (Export resale inventory to CSV)
++# =========================
+ @app.get("/resale/export")
+ def resale_export_csv():
+     conn = get_conn()
+     rows = conn.execute(
+         """
+         SELECT
+           i.id,
+           i.sku,
+           i.name,
+           i.qty_on_hand,
+           i.unit_cost,
+           i.location,
+           i.condition,
+           i.tags,
+           i.notes,
+           COALESCE(rl.status,'unlisted') AS status,
+           COALESCE(rl.channel,'unassigned') AS channel,
+           rl.list_price,
+           rl.url
+         FROM items i
+         LEFT JOIN resale_listings rl ON rl.item_id = i.id
+         WHERE i.item_type='resale'
+         ORDER BY i.updated_at DESC
+         """
+     ).fetchall()
+@@ -615,52 +713,59 @@ def resale_export_csv():
+
+     for r in rows:
+         writer.writerow([
+             r["id"],
+             r["sku"] or "",
+             r["name"] or "",
+             r["qty_on_hand"],
+             r["unit_cost"],
+             r["location"] or "",
+             r["condition"] or "",
+             r["tags"] or "",
+             r["notes"] or "",
+             r["status"] or "unlisted",
+             r["channel"] or "unassigned",
+             r["list_price"] if r["list_price"] is not None else "",
+             r["url"] or "",
+         ])
+
+     output.seek(0)
+     filename = f"saltstocks_resale_export.csv"
+     return StreamingResponse(
+         iter([output.getvalue()]),
+         media_type="text/csv",
+         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+     )
++# =========================
++# ANCHOR: RESALE_EXPORT_CSV_END
++# =========================
+
+
++# =========================
++# ANCHOR: RESALE_IMPORT_CSV_BEGIN
++# (Import resale inventory updates from CSV)
++# =========================
+ @app.post("/resale/import")
+ async def resale_import_csv(
+     file: UploadFile = File(...),
+     mode: str = Form("update")  # "update" or "append_tags"
+ ):
+     """
+     V1 Guardrails:
+     - Matches rows by 'id' (required)
+     - Updates allowed fields:
+         sku, name, unit_cost, location, condition, notes, status, channel, list_price, url
+     - Tags behavior:
+         - mode="update" replaces tags with CSV value
+         - mode="append_tags" appends CSV tags to existing tags
+     - Ignores qty_on_hand on import (protects your counts)
+     """
+     content = await file.read()
+     text = content.decode("utf-8-sig")  # handles Excel BOM if present
+
+     reader = csv.DictReader(io.StringIO(text))
+     required = {"id"}
+     if not required.issubset(set(reader.fieldnames or [])):
+         return RedirectResponse(url="/resale", status_code=303)
+
+     def _to_float(val: str):
+         val = (val or "").strip()
+@@ -769,26 +874,28 @@ async def resale_import_csv(
+                     new_status = status or cur["status"]
+                     new_list_price = list_price_val if list_price_val is not None else cur["list_price"]
+                     new_url = url or (cur["url"] or "")
+
+                     conn.execute(
+                         """
+                         UPDATE resale_listings
+                         SET channel=?, status=?, list_price=?, url=?, updated_at=datetime('now')
+                         WHERE item_id=?
+                         """,
+                         (new_channel, new_status, new_list_price, new_url or None, item_id),
+                     )
+                 else:
+                     conn.execute(
+                         """
+                         INSERT INTO resale_listings (item_id, channel, status, list_price, url)
+                         VALUES (?, ?, ?, ?, ?)
+                         """,
+                         (item_id, c, s, list_price_val, url or None),
+                     )
+
+             updated += 1
+
+     conn.close()
+     return RedirectResponse(url="/resale", status_code=303)
+-
++# =========================
++# ANCHOR: RESALE_IMPORT_CSV_END
++# =========================
