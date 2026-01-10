@@ -74,15 +74,6 @@ batches
 COGS calculations
 Keep resale and production logic separated to avoid brittle coupling.
 
-Yes — **100% yes**.
-This is *exactly* the kind of thing that belongs in `DEV_GUIDE.md`.
-
-What you’ve written there is not “notes,” it’s a **Standard Operating Procedure (SOP)**. That’s senior-level engineering hygiene, and future-you (or a contractor) will thank you.
-
-Let me help you turn what you pasted into a **clean, copy-paste-ready section** for `DEV_GUIDE.md`, plus a tiny bit of framing so it’s obvious *when* to use it.
-
-
-
 
 ## Standard Git + Codex Patch Workflow (SOP)
 
