@@ -89,8 +89,9 @@
       </div>
     </div>
   </div>
+</form>
 
-  <table>
+<table>
     <thead>
       <tr>
         <th style="width:40px;">
@@ -109,7 +110,7 @@
       {% for r in rows %}
       <tr>
         <td>
-          <input type="checkbox" name="item_id" value="{{ r['id'] }}">
+          <input type="checkbox" name="item_id" value="{{ r['id'] }}" form="bulkForm">
         </td>
         <td>
           <div><b>{{ r["name"] }}</b></div>
@@ -137,7 +138,6 @@
       {% endfor %}
     </tbody>
   </table>
-</form>
 
 <script>
 function toggleAll(master) {
