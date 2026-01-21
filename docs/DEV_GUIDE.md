@@ -75,17 +75,6 @@ COGS calculations
 Keep resale and production logic separated to avoid brittle coupling.
 
 
-Absolutely — here’s a **clean, scalable rewrite** of your **DEV_GUIDE.md** that:
-
-* Keeps your existing SOP logic
-* Clearly separates **Option A (Manual patch)** vs **Option B (PR-first)**
-* Uses **collapsible sections (`<details>`)**
-* Includes **paste-ready terminal commands**
-* Explains *why* each step exists in plain English
-
-You can paste this directly into `DEV_GUIDE.md`.
-
----
 
 # Development Guide (DEV_GUIDE)
 
