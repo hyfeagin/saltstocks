@@ -37,8 +37,28 @@
   </div>
 
   <p class="muted">
-    Safety: Import ignores qty_on_hand. Match rows by <b>id</b>. Don’t change the id column in Excel.
+    Safety: Blank <b>id</b> creates a new item, existing <b>id</b> updates that item. Unknown columns are ignored.
   </p>
+
+  {% if import_summary %}
+  <div class="card" style="margin-top:12px;">
+    <h4>Import summary</h4>
+    <ul>
+      <li>Rows processed: {{ import_summary.processed }}</li>
+      <li>Created: {{ import_summary.created }}</li>
+      <li>Updated: {{ import_summary.updated }}</li>
+      <li>Skipped: {{ import_summary.skipped }}</li>
+    </ul>
+    {% if import_summary.errors %}
+      <div class="muted">Errors:</div>
+      <ul>
+        {% for err in import_summary.errors %}
+          <li class="muted">{{ err }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 
 

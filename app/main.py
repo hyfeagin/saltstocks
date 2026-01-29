@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -761,8 +762,14 @@ def resale_export_csv():
         """
         SELECT
           i.id,
+          i.company,
+          i.category,
+          i.brand,
+          i.brand_code,
+          i.ip,
           i.sku,
           i.name,
+          i.unit,
           i.qty_on_hand,
           i.unit_cost,
           i.location,
@@ -784,15 +791,22 @@ def resale_export_csv():
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        "id","sku","name","qty_on_hand","unit_cost","location","condition","tags","notes",
+        "id","company","category","brand","brand_code","ip","sku","name","unit",
+        "qty_on_hand","unit_cost","location","condition","tags","notes",
         "status","channel","list_price","url"
     ])
 
     for r in rows:
         writer.writerow([
             r["id"],
+            r["company"] or "",
+            r["category"] or "",
+            r["brand"] or "",
+            r["brand_code"] or "",
+            r["ip"] or "",
             r["sku"] or "",
             r["name"] or "",
+            r["unit"] or "",
             r["qty_on_hand"],
             r["unit_cost"],
             r["location"] or "",
@@ -823,156 +837,364 @@ def resale_export_csv():
 # =========================
 @app.post("/resale/import")
 async def resale_import_csv(
+    request: Request,
     file: UploadFile = File(...),
     mode: str = Form("update")  # "update" or "append_tags"
 ):
     """
-    V1 Guardrails:
-    - Matches rows by 'id' (required)
-    - Updates allowed fields:
-        sku, name, unit_cost, location, condition, notes, status, channel, list_price, url
+    CSV import rules:
+    - If id matches an existing item, update that item.
+    - If id is blank/NULL, create a new item.
+    - If id is provided but not found, skip with error.
+    - Unknown columns are ignored, missing columns are allowed.
+    - qty_on_hand/unit_cost/list_price parse as floats; invalid values skip the row.
+    - Blank qty_on_hand/unit_cost default to 0; blank list_price becomes NULL.
+    - SKU rules:
+        - If SKU blank for new item, auto-generate from company+brand_code.
+        - If SKU provided, must be unique (create) or not conflict (update).
     - Tags behavior:
-        - mode="update" replaces tags with CSV value
-        - mode="append_tags" appends CSV tags to existing tags
-    - Ignores qty_on_hand on import (protects your counts)
+        - mode="update" replaces tags with CSV value (blank clears).
+        - mode="append_tags" appends CSV tags (blank does nothing).
     """
     content = await file.read()
     text = content.decode("utf-8-sig")  # handles Excel BOM if present
 
     reader = csv.DictReader(io.StringIO(text))
-    required = {"id"}
-    if not required.issubset(set(reader.fieldnames or [])):
-        return RedirectResponse(url="/resale", status_code=303)
+    header_set = {h.strip() for h in (reader.fieldnames or []) if h}
 
-    def _to_float(val: str):
-        val = (val or "").strip()
-        if val == "":
+    known_item_fields = {
+        "company",
+        "category",
+        "brand",
+        "brand_code",
+        "ip",
+        "sku",
+        "name",
+        "unit",
+        "qty_on_hand",
+        "unit_cost",
+        "location",
+        "condition",
+        "tags",
+        "notes",
+    }
+    listing_fields = {"status", "channel", "list_price", "url"}
+    known_fields = {"id"} | known_item_fields | listing_fields
+
+    def normalize_empty(val: Optional[str]) -> Optional[str]:
+        if val is None:
+            return None
+        cleaned = str(val).strip()
+        if cleaned == "" or cleaned.lower() == "null":
+            return None
+        return cleaned
+
+    def parse_float(val: Optional[str]) -> Optional[float]:
+        if val is None:
             return None
         try:
             return float(val)
         except ValueError:
-            return None
+            raise ValueError("invalid number")
+
+    errors: List[str] = []
+    processed = 0
+    created = 0
+    updated = 0
+    skipped = 0
+
+    def fetch_resale_rows():
+        conn = get_conn()
+        rows = conn.execute(
+            """
+            SELECT
+              i.*,
+              COALESCE(rl.status, 'unlisted') AS status,
+              COALESCE(rl.channel, 'unassigned') AS channel,
+              rl.list_price,
+              rl.url
+            FROM items i
+            LEFT JOIN resale_listings rl ON rl.item_id = i.id
+            WHERE i.item_type='resale'
+            ORDER BY i.updated_at DESC
+            """
+        ).fetchall()
+        conn.close()
+        return rows
+
+    if not reader.fieldnames:
+        summary = {
+            "processed": 0,
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "errors": ["No headers found in CSV."],
+        }
+        return templates.TemplateResponse(
+            "resale_list.html",
+            {"request": request, "rows": fetch_resale_rows(), "q": "", "import_summary": summary},
+        )
 
     conn = get_conn()
-    updated = 0
-
     with conn:
-        for row in reader:
-            rid = (row.get("id") or "").strip()
-            if not rid.isdigit():
+        for row_num, row in enumerate(reader, start=2):
+            if not any(normalize_empty(value) for key, value in row.items() if key in known_fields):
                 continue
-            item_id = int(rid)
+            processed += 1
+            row_errors: List[str] = []
 
-            # Pull allowed fields (blank means "no change" for most fields)
-            sku = (row.get("sku") or "").strip()
-            name = (row.get("name") or "").strip()
-            location = (row.get("location") or "").strip()
-            condition = (row.get("condition") or "").strip()
-            notes = (row.get("notes") or "").strip()
-            tags = (row.get("tags") or "").strip()
-
-            status = (row.get("status") or "").strip()
-            channel = (row.get("channel") or "").strip()
-
-            unit_cost_val = _to_float(row.get("unit_cost") or "")
-            list_price_val = _to_float(row.get("list_price") or "")
-            url = (row.get("url") or "").strip()
-
-            # Update items table (only apply non-blank values; unit_cost applies if numeric)
-            sets = []
-            vals = []
-
-            if sku != "":
-                sets.append("sku=?")
-                vals.append(sku or None)
-            if name != "":
-                sets.append("name=?")
-                vals.append(name)
-            if location != "":
-                sets.append("location=?")
-                vals.append(location)
-            if condition != "":
-                sets.append("condition=?")
-                vals.append(condition)
-            if notes != "":
-                sets.append("notes=?")
-                vals.append(notes)
-
-            if unit_cost_val is not None:
-                sets.append("unit_cost=?")
-                vals.append(unit_cost_val)
-
-            if tags != "":
-                if mode == "append_tags":
-                    # append tags
-                    conn.execute(
-                        """
-                        UPDATE items
-                        SET tags =
-                          CASE
-                            WHEN tags IS NULL OR TRIM(tags) = '' THEN ?
-                            ELSE tags || ', ' || ?
-                          END
-                        WHERE id=? AND item_type='resale'
-                        """,
-                        (tags, tags, item_id),
-                    )
+            raw_id = normalize_empty(row.get("id"))
+            item_id: Optional[int] = None
+            is_create = raw_id is None
+            if raw_id is not None:
+                if not raw_id.isdigit():
+                    row_errors.append("id must be a number or blank")
                 else:
-                    # replace tags
-                    sets.append("tags=?")
-                    vals.append(tags)
-
-            if sets:
-                vals.append(item_id)
-                conn.execute(
-                    f"UPDATE items SET {', '.join(sets)} WHERE id=? AND item_type='resale'",
-                    tuple(vals),
-                )
-
-            # Update listing fields (status/channel/list_price/url)
-            if status or channel or (list_price_val is not None) or (url != ""):
-                existing = conn.execute(
-                    "SELECT id FROM resale_listings WHERE item_id=?",
-                    (item_id,),
-                ).fetchone()
-
-                # default fallbacks if creating
-                c = channel or "unassigned"
-                s = status or "unlisted"
-
-                if existing:
-                    # only update provided fields; keep existing if blank
-                    # easiest: fetch current then write back merged
-                    cur = conn.execute(
-                        "SELECT channel, status, list_price, url FROM resale_listings WHERE item_id=?",
+                    item_id = int(raw_id)
+                    existing_item = conn.execute(
+                        "SELECT id FROM items WHERE id=? AND item_type='resale'",
                         (item_id,),
                     ).fetchone()
-                    new_channel = channel or cur["channel"]
-                    new_status = status or cur["status"]
-                    new_list_price = list_price_val if list_price_val is not None else cur["list_price"]
-                    new_url = url or (cur["url"] or "")
+                    if existing_item is None:
+                        row_errors.append(f"id {item_id} not found")
 
-                    conn.execute(
+            def get_value(field: str) -> Optional[str]:
+                if field in header_set:
+                    return normalize_empty(row.get(field))
+                return None
+
+            name_val = get_value("name")
+            if is_create and not name_val:
+                row_errors.append("name is required for new items")
+            if not is_create and "name" in header_set and not name_val:
+                row_errors.append("name cannot be blank when updating")
+
+            qty_raw = get_value("qty_on_hand")
+            unit_cost_raw = get_value("unit_cost")
+            list_price_raw = get_value("list_price")
+
+            qty_val = None
+            unit_cost_val = None
+            list_price_val = None
+
+            try:
+                if "qty_on_hand" in header_set:
+                    qty_val = parse_float(qty_raw)
+                if "unit_cost" in header_set:
+                    unit_cost_val = parse_float(unit_cost_raw)
+                if "list_price" in header_set:
+                    list_price_val = parse_float(list_price_raw)
+            except ValueError:
+                row_errors.append("invalid numeric value")
+
+            sku_val = get_value("sku")
+            if not is_create and "sku" in header_set and sku_val:
+                conflict = conn.execute(
+                    "SELECT id FROM items WHERE sku=? AND id<>?",
+                    (sku_val, item_id),
+                ).fetchone()
+                if conflict:
+                    row_errors.append(f"sku {sku_val} is already in use")
+
+            if row_errors:
+                skipped += 1
+                errors.append(f"Row {row_num}: {', '.join(row_errors)}")
+                continue
+
+            try:
+                conn.execute("SAVEPOINT resale_import_row")
+                if is_create:
+                    company_val = normalize_code(get_value("company") or "GV")
+                    brand_code_val = normalize_code(get_value("brand_code") or "MISC")
+                    brand_val = get_value("brand")
+                    category_val = get_value("category")
+                    ip_val = get_value("ip")
+                    location_val = get_value("location")
+                    condition_val = get_value("condition")
+                    tags_val = get_value("tags")
+                    notes_val = get_value("notes")
+                    unit_val = get_value("unit") or "each"
+
+                    if sku_val is None or sku_val == "":
+                        sku_val = get_next_sku(conn, company_val, brand_code_val)
+                    else:
+                        conflict = conn.execute(
+                            "SELECT id FROM items WHERE sku=?",
+                            (sku_val,),
+                        ).fetchone()
+                        if conflict:
+                            raise ValueError(f"sku {sku_val} is already in use")
+
+                    qty_final = qty_val if qty_val is not None else 0.0
+                    unit_cost_final = unit_cost_val if unit_cost_val is not None else 0.0
+
+                    cur = conn.execute(
                         """
-                        UPDATE resale_listings
-                        SET channel=?, status=?, list_price=?, url=?, updated_at=datetime('now')
-                        WHERE item_id=?
+                        INSERT INTO items (
+                          item_type, company, category, brand, brand_code, ip,
+                          sku, name, unit, qty_on_hand, unit_cost,
+                          location, condition, tags, notes
+                        )
+                        VALUES (
+                          'resale', ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?
+                        )
                         """,
-                        (new_channel, new_status, new_list_price, new_url or None, item_id),
+                        (
+                            company_val,
+                            category_val,
+                            brand_val,
+                            brand_code_val,
+                            ip_val,
+                            sku_val,
+                            name_val,
+                            unit_val,
+                            qty_final,
+                            unit_cost_final,
+                            location_val,
+                            condition_val,
+                            tags_val,
+                            notes_val,
+                        ),
                     )
-                else:
+                    new_id = cur.lastrowid
+
+                    status_val = get_value("status") or "unlisted"
+                    channel_val = get_value("channel") or "unassigned"
+                    url_val = get_value("url")
                     conn.execute(
                         """
                         INSERT INTO resale_listings (item_id, channel, status, list_price, url)
                         VALUES (?, ?, ?, ?, ?)
                         """,
-                        (item_id, c, s, list_price_val, url or None),
+                        (new_id, channel_val, status_val, list_price_val, url_val),
                     )
+                    created += 1
+                else:
+                    item_sets = []
+                    item_vals: List[Optional[object]] = []
 
-            updated += 1
+                    field_map = {
+                        "company": normalize_code,
+                        "category": lambda x: x,
+                        "brand": lambda x: x,
+                        "brand_code": normalize_code,
+                        "ip": lambda x: x,
+                        "sku": lambda x: x,
+                        "name": lambda x: x,
+                        "unit": lambda x: x,
+                        "location": lambda x: x,
+                        "condition": lambda x: x,
+                        "notes": lambda x: x,
+                    }
+
+                    for field, transform in field_map.items():
+                        if field in header_set:
+                            value = get_value(field)
+                            item_sets.append(f"{field}=?")
+                            item_vals.append(transform(value) if value is not None else None)
+
+                    if "qty_on_hand" in header_set:
+                        item_sets.append("qty_on_hand=?")
+                        item_vals.append(qty_val if qty_val is not None else 0.0)
+                    if "unit_cost" in header_set:
+                        item_sets.append("unit_cost=?")
+                        item_vals.append(unit_cost_val if unit_cost_val is not None else 0.0)
+
+                    tags_val = get_value("tags") if "tags" in header_set else None
+                    if "tags" in header_set and mode == "append_tags":
+                        if tags_val:
+                            conn.execute(
+                                """
+                                UPDATE items
+                                SET tags =
+                                  CASE
+                                    WHEN tags IS NULL OR TRIM(tags) = '' THEN ?
+                                    ELSE tags || ', ' || ?
+                                  END
+                                WHERE id=? AND item_type='resale'
+                                """,
+                                (tags_val, tags_val, item_id),
+                            )
+                    elif "tags" in header_set:
+                        item_sets.append("tags=?")
+                        item_vals.append(tags_val)
+
+                    if item_sets:
+                        item_vals.append(item_id)
+                        conn.execute(
+                            f"UPDATE items SET {', '.join(item_sets)} WHERE id=? AND item_type='resale'",
+                            tuple(item_vals),
+                        )
+
+                    listing_present = any(field in header_set for field in listing_fields)
+                    if listing_present:
+                        listing_row = conn.execute(
+                            "SELECT channel, status, list_price, url FROM resale_listings WHERE item_id=?",
+                            (item_id,),
+                        ).fetchone()
+
+                        status_val = get_value("status")
+                        channel_val = get_value("channel")
+                        url_val = get_value("url") if "url" in header_set else None
+                        list_price_provided = "list_price" in header_set
+                        url_provided = "url" in header_set
+
+                        if listing_row:
+                            new_channel = channel_val or listing_row["channel"]
+                            new_status = status_val or listing_row["status"]
+                            new_list_price = (
+                                list_price_val if list_price_provided else listing_row["list_price"]
+                            )
+                            new_url = url_val if url_provided else listing_row["url"]
+
+                            conn.execute(
+                                """
+                                UPDATE resale_listings
+                                SET channel=?, status=?, list_price=?, url=?, updated_at=datetime('now')
+                                WHERE item_id=?
+                                """,
+                                (new_channel, new_status, new_list_price, new_url, item_id),
+                            )
+                        else:
+                            conn.execute(
+                                """
+                                INSERT INTO resale_listings (item_id, channel, status, list_price, url)
+                                VALUES (?, ?, ?, ?, ?)
+                                """,
+                                (
+                                    item_id,
+                                    channel_val or "unassigned",
+                                    status_val or "unlisted",
+                                    list_price_val,
+                                    url_val,
+                                ),
+                            )
+
+                    updated += 1
+
+                conn.execute("RELEASE resale_import_row")
+            except (sqlite3.IntegrityError, ValueError) as exc:
+                conn.execute("ROLLBACK TO resale_import_row")
+                conn.execute("RELEASE resale_import_row")
+                skipped += 1
+                errors.append(f"Row {row_num}: {exc}")
 
     conn.close()
-    return RedirectResponse(url="/resale", status_code=303)
+
+    summary = {
+        "processed": processed,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    }
+
+    return templates.TemplateResponse(
+        "resale_list.html",
+        {"request": request, "rows": fetch_resale_rows(), "q": "", "import_summary": summary},
+    )
 # =========================
 # ANCHOR: RESALE_IMPORT_CSV_END
 # =========================

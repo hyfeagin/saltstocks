@@ -87,3 +87,19 @@ Backups are stored in:
 Recommended habit:
 - Backup at the start of a work session
 - Backup at the end of a work session
+
+## CSV import/export (new items + updates)
+Use **Export CSV** on the Resale Inventory page to get a template that you can edit in Excel/Sheets.
+
+Import rules:
+- **Blank id** → creates a new item (SKU auto-generates if blank).
+- **Existing id** → updates that item.
+- **Unknown columns** are ignored, and **missing columns** are allowed.
+- **qty_on_hand** and **unit_cost**: blank defaults to 0; invalid numbers skip the row.
+- **list_price**: blank clears it; invalid numbers skip the row.
+- **SKU uniqueness** is enforced on create and update.
+
+Workflow:
+1) Export CSV.
+2) Add new rows with blank id, or edit existing rows.
+3) Import CSV and review the import summary for any skipped rows.
