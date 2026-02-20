@@ -10,6 +10,7 @@ SaltStocks is a local inventory web app for a small business. It currently suppo
 ✅ Auto SKU generation
 ✅ Bulk edit
 ✅ Backup
+✅ eBay pull import (preview + apply deductions, idempotent per order line)
 🚧 Future: Umivera materials + recipes + batches + COGS logic
 
 ## Tech stack
@@ -52,3 +53,8 @@ Recommended workflow:
 Edit locally → test locally → commit → push
 Status
 This is currently a private internal tool. It may later be expanded for Umivera (materials + production).
+
+## eBay import (MVP) notes
+- Configure credentials in UI: `/settings/ebay`.
+- You must manually obtain an eBay OAuth `refresh_token` via eBay Authorization Code Grant flow; this app only performs `refresh_token -> access_token` refresh.
+- Root assumption: Saltstocks `sku` must match eBay listing SKU/Custom Label for automatic matching and deductions.

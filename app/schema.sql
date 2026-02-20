@@ -40,6 +40,30 @@ CREATE TABLE IF NOT EXISTS categories (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS ebay_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  client_id TEXT,
+  client_secret TEXT,
+  environment TEXT NOT NULL DEFAULT 'SANDBOX' CHECK (environment IN ('PRODUCTION', 'SANDBOX')),
+  refresh_token TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ebay_import_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id TEXT NOT NULL,
+  line_item_id TEXT NOT NULL,
+  sku TEXT,
+  qty REAL NOT NULL,
+  imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+  item_id INTEGER,
+  FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE SET NULL,
+  UNIQUE(order_id, line_item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ebay_import_log_sku ON ebay_import_log(sku);
+CREATE INDEX IF NOT EXISTS idx_ebay_import_log_item_id ON ebay_import_log(item_id);
+
 CREATE TRIGGER IF NOT EXISTS trg_items_updated_at
 AFTER UPDATE ON items
 FOR EACH ROW

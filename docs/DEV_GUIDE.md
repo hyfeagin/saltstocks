@@ -74,6 +74,16 @@ batches
 COGS calculations
 Keep resale and production logic separated to avoid brittle coupling.
 
+## eBay Import MVP
+- Settings UI: `/settings/ebay` stores `client_id`, `client_secret`, `environment`, and `refresh_token` in local SQLite (`ebay_settings` table).
+- Import UI: `/ebay/import` is pull-based and preview-first. It fetches orders from eBay Fulfillment `getOrders`, matches by SKU, and applies deductions only on explicit confirmation.
+- Idempotency: `ebay_import_log` stores `(order_id, line_item_id)` and prevents double-deductions across reruns.
+- Deduction rule: `new_qty = max(0, qty_on_hand - qty_sold)` with clamped rows shown as `oversold/clamped`.
+
+### Root assumptions
+- Saltstocks SKU must match the eBay SKU/Custom Label on listings.
+- Refresh token is manually obtained via eBay Authorization Code Grant flow; this app does not host the full auth redirect flow.
+
 
 
 # Development Guide (DEV_GUIDE)
@@ -627,4 +637,3 @@ OUTPUT FORMAT
 - After the diff, include:
   1) a short explanation of what changed and why
   2) a manual test checklist (click steps + expected results)
-

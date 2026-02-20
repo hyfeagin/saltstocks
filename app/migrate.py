@@ -121,6 +121,42 @@ def migrate():
                 category_seed,
             )
 
+        # eBay settings (single-row table)
+        if not table_exists(conn, "ebay_settings"):
+            conn.execute("""
+            CREATE TABLE ebay_settings (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              client_id TEXT,
+              client_secret TEXT,
+              environment TEXT NOT NULL DEFAULT 'SANDBOX'
+                CHECK (environment IN ('PRODUCTION', 'SANDBOX')),
+              refresh_token TEXT,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
+        # eBay import idempotency log
+        if not table_exists(conn, "ebay_import_log"):
+            conn.execute("""
+            CREATE TABLE ebay_import_log (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              order_id TEXT NOT NULL,
+              line_item_id TEXT NOT NULL,
+              sku TEXT,
+              qty REAL NOT NULL,
+              imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+              item_id INTEGER,
+              FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE SET NULL,
+              UNIQUE(order_id, line_item_id)
+            )
+            """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ebay_import_log_sku ON ebay_import_log(sku)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ebay_import_log_item_id ON ebay_import_log(item_id)"
+        )
+
         # Ensure SKU uniqueness if possible (existing duplicates would block this)
         # We'll try to add a unique index; if it fails, we won't crash.
         try:

@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Import eBay Orders</h1>
+<p class="muted">Preview first, then apply deductions. SKU matching requires Saltstocks <code>items.sku</code> to match eBay SKU/Custom Label.</p>
+
+{% if missing_credentials %}
+<div class="card" style="border-color:#caa46a;">
+  <b>Missing credentials:</b>
+  {% for field in missing_credentials %}
+    <code>{{ field }}</code>{% if not loop.last %}, {% endif %}
+  {% endfor %}.
+  <a href="/settings/ebay">Open eBay settings</a>
+</div>
+{% endif %}
+
+{% if error_message %}
+<div class="card" style="border-color:#d98c8c;">
+  <b>Error:</b> {{ error_message }}
+</div>
+{% endif %}
+
+{% if success_message %}
+<div class="card" style="border-color:#89b48f;">
+  <b>Success:</b> {{ success_message }}
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="post" action="/ebay/import">
+    <div class="row">
+      <div>
+        <label>Start date</label>
+        <input type="date" name="start_date" value="{{ start_date }}" required />
+      </div>
+      <div>
+        <label>End date</label>
+        <input type="date" name="end_date" value="{{ end_date }}" required />
+      </div>
+      <div>
+        <label>Status filter</label>
+        <select name="status_filter">
+          {% for opt in ['PAID','FULFILLED','NOT_STARTED','IN_PROGRESS','COMPLETED','ANY'] %}
+          <option value="{{ opt }}" {{ 'selected' if status_filter == opt else '' }}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="align-self:end;">
+        <label><input type="checkbox" name="dry_run" value="on" {{ 'checked' if dry_run else '' }} /> Dry run / Preview only</label>
+      </div>
+    </div>
+
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <button class="btn" type="submit" name="action" value="preview">Preview</button>
+      <button class="btn btn-primary" type="submit" name="action" value="apply">Apply deductions</button>
+    </div>
+  </form>
+</div>
+
+{% if summary %}
+<div class="card">
+  <h3>Summary</h3>
+  <ul>
+    <li>Orders seen: {{ summary.orders_seen }}</li>
+    <li>Line items seen: {{ summary.line_items_seen }}</li>
+    <li>Matched: {{ summary.matched }}</li>
+    <li>Unmatched: {{ summary.unmatched }}</li>
+    <li>Already imported: {{ summary.already_imported }}</li>
+    <li>Oversold/clamped: {{ summary.clamped }}</li>
+    <li>Deductions applied this run: {{ summary.applied }}</li>
+  </ul>
+</div>
+{% endif %}
+
+{% if preview_rows %}
+<div class="card">
+  <h3>Preview</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Line Item</th>
+        <th>Purchase Date</th>
+        <th>SKU</th>
+        <th>Saltstocks Item</th>
+        <th>Qty Sold</th>
+        <th>Current Qty</th>
+        <th>Projected Qty</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preview_rows %}
+      <tr>
+        <td><code>{{ row.order_id }}</code></td>
+        <td><code>{{ row.line_item_id }}</code></td>
+        <td>{{ row.purchase_date or '-' }}</td>
+        <td>{{ row.sku or '-' }}</td>
+        <td>{{ row.item_name or '-' }}</td>
+        <td>{{ "%.2f"|format(row.qty_sold) }}</td>
+        <td>{% if row.current_qty_on_hand is not none %}{{ "%.2f"|format(row.current_qty_on_hand) }}{% else %}-{% endif %}</td>
+        <td>{% if row.projected_qty_on_hand is not none %}{{ "%.2f"|format(row.projected_qty_on_hand) }}{% else %}-{% endif %}</td>
+        <td>{{ row.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Unmatched (no deduction)</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Order</th>
+        <th>Line Item</th>
+        <th>SKU</th>
+        <th>Qty Sold</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set ns = namespace(found=false) %}
+      {% for row in preview_rows %}
+        {% if row.status == 'unmatched' %}
+        {% set ns.found = true %}
+        <tr>
+          <td><code>{{ row.order_id }}</code></td>
+          <td><code>{{ row.line_item_id }}</code></td>
+          <td>{{ row.sku or '-' }}</td>
+          <td>{{ "%.2f"|format(row.qty_sold) }}</td>
+        </tr>
+        {% endif %}
+      {% endfor %}
+      {% if not ns.found %}
+      <tr>
+        <td colspan="4" class="muted">No unmatched line items in this preview.</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
