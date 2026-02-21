@@ -82,28 +82,73 @@ def get_next_sku(conn, company: str, code: str) -> str:
     return f"{company}-{code}-{next_seq:06d}"
 
 
-def get_ebay_settings(conn) -> Dict[str, Optional[str]]:
-    row = conn.execute(
-        """
-        SELECT client_id, client_secret, environment, refresh_token, updated_at
-        FROM ebay_settings
-        WHERE id=1
-        """
-    ).fetchone()
-    if not row:
-        return {
-            "client_id": "",
-            "client_secret": "",
-            "environment": "SANDBOX",
-            "refresh_token": "",
-            "updated_at": None,
-        }
+def _empty_ebay_profile() -> Dict[str, Optional[str]]:
     return {
-        "client_id": row["client_id"] or "",
-        "client_secret": row["client_secret"] or "",
-        "environment": row["environment"] or "SANDBOX",
-        "refresh_token": row["refresh_token"] or "",
-        "updated_at": row["updated_at"],
+        "client_id": "",
+        "client_secret": "",
+        "refresh_token": "",
+        "updated_at": None,
+    }
+
+
+def get_ebay_profile_bundle(conn) -> Dict[str, Any]:
+    profiles = {
+        "SANDBOX": _empty_ebay_profile(),
+        "PRODUCTION": _empty_ebay_profile(),
+    }
+
+    try:
+        active_row = conn.execute(
+            """
+            SELECT active_environment
+            FROM ebay_state
+            WHERE id=1
+            """
+        ).fetchone()
+        active_environment = (active_row["active_environment"] if active_row else "SANDBOX") or "SANDBOX"
+        if active_environment not in {"PRODUCTION", "SANDBOX"}:
+            active_environment = "SANDBOX"
+
+        rows = conn.execute(
+            """
+            SELECT environment, client_id, client_secret, refresh_token, updated_at
+            FROM ebay_credentials
+            """
+        ).fetchall()
+        for row in rows:
+            env = (row["environment"] or "").upper()
+            if env in profiles:
+                profiles[env] = {
+                    "client_id": row["client_id"] or "",
+                    "client_secret": row["client_secret"] or "",
+                    "refresh_token": row["refresh_token"] or "",
+                    "updated_at": row["updated_at"],
+                }
+    except sqlite3.OperationalError:
+        # Pre-migration fallback for older local databases.
+        legacy_row = conn.execute(
+            """
+            SELECT client_id, client_secret, environment, refresh_token, updated_at
+            FROM ebay_settings
+            WHERE id=1
+            """
+        ).fetchone()
+        active_environment = "SANDBOX"
+        if legacy_row:
+            legacy_env = (legacy_row["environment"] or "SANDBOX").upper()
+            if legacy_env in {"PRODUCTION", "SANDBOX"}:
+                active_environment = legacy_env
+            profiles[active_environment] = {
+                "client_id": legacy_row["client_id"] or "",
+                "client_secret": legacy_row["client_secret"] or "",
+                "refresh_token": legacy_row["refresh_token"] or "",
+                "updated_at": legacy_row["updated_at"],
+            }
+
+    return {
+        "active_environment": active_environment,
+        "profiles": profiles,
+        "active_profile": profiles[active_environment],
     }
 
 
@@ -374,7 +419,7 @@ def config_home(request: Request, saved_ebay: int = 0):
     categories = conn.execute(
         "SELECT * FROM categories ORDER BY name ASC"
     ).fetchall()
-    ebay_settings = get_ebay_settings(conn)
+    ebay_bundle = get_ebay_profile_bundle(conn)
     conn.close()
     return templates.TemplateResponse(
         "config.html",
@@ -382,8 +427,10 @@ def config_home(request: Request, saved_ebay: int = 0):
             "request": request,
             "codes": codes,
             "categories": categories,
-            "ebay_settings": ebay_settings,
-            "ebay_missing": missing_ebay_credentials(ebay_settings),
+            "ebay_active_environment": ebay_bundle["active_environment"],
+            "ebay_profiles": ebay_bundle["profiles"],
+            "ebay_settings": ebay_bundle["active_profile"],
+            "ebay_missing": missing_ebay_credentials(ebay_bundle["active_profile"]),
             "saved_ebay": saved_ebay == 1,
         },
     )
@@ -525,21 +572,30 @@ def ebay_settings_save(
     with conn:
         conn.execute(
             """
-            INSERT INTO ebay_settings (id, client_id, client_secret, environment, refresh_token, updated_at)
-            VALUES (1, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(id) DO UPDATE SET
+            INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, updated_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(environment) DO UPDATE SET
               client_id=excluded.client_id,
               client_secret=excluded.client_secret,
-              environment=excluded.environment,
               refresh_token=excluded.refresh_token,
               updated_at=datetime('now')
             """,
             (
+                env_value,
                 (client_id or "").strip(),
                 (client_secret or "").strip(),
-                env_value,
                 (refresh_token or "").strip(),
             ),
+        )
+        conn.execute(
+            """
+            INSERT INTO ebay_state (id, active_environment, updated_at)
+            VALUES (1, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+              active_environment=excluded.active_environment,
+              updated_at=datetime('now')
+            """,
+            (env_value,),
         )
     conn.close()
     return RedirectResponse(url="/config?saved_ebay=1#ebay-settings", status_code=303)
@@ -557,7 +613,11 @@ def ebay_import_page(request: Request):
     end_date_value = date.today()
     start_date_value = end_date_value - timedelta(days=7)
     conn = get_conn()
-    settings = get_ebay_settings(conn)
+    ebay_bundle = get_ebay_profile_bundle(conn)
+    settings = {
+        **ebay_bundle["active_profile"],
+        "environment": ebay_bundle["active_environment"],
+    }
     conn.close()
     return templates.TemplateResponse(
         "ebay_import.html",
@@ -628,7 +688,11 @@ def ebay_import_run(
         )
 
     conn = get_conn()
-    settings_dict = get_ebay_settings(conn)
+    ebay_bundle = get_ebay_profile_bundle(conn)
+    settings_dict = {
+        **ebay_bundle["active_profile"],
+        "environment": ebay_bundle["active_environment"],
+    }
     missing_credentials = missing_ebay_credentials(settings_dict)
     if missing_credentials:
         conn.close()

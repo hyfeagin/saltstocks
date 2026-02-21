@@ -49,6 +49,21 @@ CREATE TABLE IF NOT EXISTS ebay_settings (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS ebay_credentials (
+  environment TEXT PRIMARY KEY CHECK (environment IN ('PRODUCTION', 'SANDBOX')),
+  client_id TEXT,
+  client_secret TEXT,
+  refresh_token TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS ebay_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  active_environment TEXT NOT NULL DEFAULT 'SANDBOX'
+    CHECK (active_environment IN ('PRODUCTION', 'SANDBOX')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS ebay_import_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_id TEXT NOT NULL,

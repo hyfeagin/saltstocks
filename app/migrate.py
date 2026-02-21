@@ -135,6 +135,75 @@ def migrate():
             )
             """)
 
+        # eBay credentials by environment (supports separate sandbox/prod keys)
+        if not table_exists(conn, "ebay_credentials"):
+            conn.execute("""
+            CREATE TABLE ebay_credentials (
+              environment TEXT PRIMARY KEY
+                CHECK (environment IN ('PRODUCTION', 'SANDBOX')),
+              client_id TEXT,
+              client_secret TEXT,
+              refresh_token TEXT,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
+        # Active environment selector (which credential set should be used)
+        if not table_exists(conn, "ebay_state"):
+            conn.execute("""
+            CREATE TABLE ebay_state (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              active_environment TEXT NOT NULL DEFAULT 'SANDBOX'
+                CHECK (active_environment IN ('PRODUCTION', 'SANDBOX')),
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+            conn.execute(
+                "INSERT OR IGNORE INTO ebay_state (id, active_environment) VALUES (1, 'SANDBOX')"
+            )
+
+        # Backfill from legacy ebay_settings single row to new profile/state tables.
+        if table_exists(conn, "ebay_settings"):
+            legacy = conn.execute(
+                """
+                SELECT client_id, client_secret, refresh_token, environment
+                FROM ebay_settings
+                WHERE id=1
+                """
+            ).fetchone()
+            if legacy:
+                legacy_env = (legacy[3] or "SANDBOX").upper()
+                if legacy_env not in {"PRODUCTION", "SANDBOX"}:
+                    legacy_env = "SANDBOX"
+
+                conn.execute(
+                    """
+                    INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, updated_at)
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(environment) DO UPDATE SET
+                      client_id=COALESCE(NULLIF(excluded.client_id,''), ebay_credentials.client_id),
+                      client_secret=COALESCE(NULLIF(excluded.client_secret,''), ebay_credentials.client_secret),
+                      refresh_token=COALESCE(NULLIF(excluded.refresh_token,''), ebay_credentials.refresh_token),
+                      updated_at=datetime('now')
+                    """,
+                    (
+                        legacy_env,
+                        legacy[0] or "",
+                        legacy[1] or "",
+                        legacy[2] or "",
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO ebay_state (id, active_environment, updated_at)
+                    VALUES (1, ?, datetime('now'))
+                    ON CONFLICT(id) DO UPDATE SET
+                      active_environment=excluded.active_environment,
+                      updated_at=datetime('now')
+                    """,
+                    (legacy_env,),
+                )
+
         # eBay import idempotency log
         if not table_exists(conn, "ebay_import_log"):
             conn.execute("""

@@ -26,29 +26,30 @@
     <div class="row">
       <div>
         <label>Environment</label>
-        <select name="environment">
-          <option value="SANDBOX" {{ 'selected' if ebay_settings.environment == 'SANDBOX' else '' }}>SANDBOX</option>
-          <option value="PRODUCTION" {{ 'selected' if ebay_settings.environment == 'PRODUCTION' else '' }}>PRODUCTION</option>
+        <select name="environment" id="ebay-environment">
+          <option value="SANDBOX" {{ 'selected' if ebay_active_environment == 'SANDBOX' else '' }}>SANDBOX</option>
+          <option value="PRODUCTION" {{ 'selected' if ebay_active_environment == 'PRODUCTION' else '' }}>PRODUCTION</option>
         </select>
       </div>
       <div></div>
       <div>
         <label>Client ID (App ID)</label>
-        <input name="client_id" value="{{ ebay_settings.client_id }}" placeholder="eBay client_id" />
+        <input id="ebay-client-id" name="client_id" value="{{ ebay_settings.client_id }}" placeholder="eBay client_id" />
       </div>
       <div>
         <label>Client Secret</label>
-        <input name="client_secret" value="{{ ebay_settings.client_secret }}" placeholder="eBay client_secret" />
+        <input id="ebay-client-secret" name="client_secret" value="{{ ebay_settings.client_secret }}" placeholder="eBay client_secret" />
       </div>
       <div style="grid-column: 1 / span 2;">
         <label>Refresh Token</label>
-        <textarea name="refresh_token" rows="4" placeholder="Long-lived refresh token from eBay auth code flow">{{ ebay_settings.refresh_token }}</textarea>
+        <textarea id="ebay-refresh-token" name="refresh_token" rows="4" placeholder="Long-lived refresh token from eBay auth code flow">{{ ebay_settings.refresh_token }}</textarea>
       </div>
     </div>
     <div style="margin-top:12px;">
       <button class="btn btn-primary" type="submit">Save eBay Settings</button>
     </div>
   </form>
+  <p class="muted">Each environment keeps its own credentials. Switching the dropdown loads that environment's saved values.</p>
 </div>
 
 <div class="card">
@@ -176,4 +177,24 @@
     Note: deleting or deactivating a code won’t change existing SKUs, but may remove it from dropdowns for new items.
   </p>
 </div>
+<script>
+  (function() {
+    const profiles = {{ ebay_profiles | tojson }};
+    const envSelect = document.getElementById("ebay-environment");
+    const clientId = document.getElementById("ebay-client-id");
+    const clientSecret = document.getElementById("ebay-client-secret");
+    const refreshToken = document.getElementById("ebay-refresh-token");
+
+    function applyProfile(env) {
+      const profile = profiles[env] || {};
+      clientId.value = profile.client_id || "";
+      clientSecret.value = profile.client_secret || "";
+      refreshToken.value = profile.refresh_token || "";
+    }
+
+    envSelect.addEventListener("change", function() {
+      applyProfile(envSelect.value);
+    });
+  })();
+</script>
 {% endblock %}
