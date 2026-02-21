@@ -3,6 +3,54 @@
 <h1>Configurator</h1>
 <p class="muted">Manage the predefined Brand/Item codes used for SKU generation and dropdowns.</p>
 
+<div class="card" id="ebay-settings">
+  <h3>eBay Settings</h3>
+  <p class="muted">Store OAuth credentials locally for pull-based order import.</p>
+
+  {% if saved_ebay %}
+  <div class="card" style="border-color:#89b48f;">
+    <b>Saved.</b> eBay settings were updated.
+  </div>
+  {% endif %}
+
+  {% if ebay_missing %}
+  <div class="card" style="border-color:#caa46a;">
+    <b>Missing required fields:</b>
+    {% for field in ebay_missing %}
+      <code>{{ field }}</code>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/settings/ebay">
+    <div class="row">
+      <div>
+        <label>Environment</label>
+        <select name="environment">
+          <option value="SANDBOX" {{ 'selected' if ebay_settings.environment == 'SANDBOX' else '' }}>SANDBOX</option>
+          <option value="PRODUCTION" {{ 'selected' if ebay_settings.environment == 'PRODUCTION' else '' }}>PRODUCTION</option>
+        </select>
+      </div>
+      <div></div>
+      <div>
+        <label>Client ID (App ID)</label>
+        <input name="client_id" value="{{ ebay_settings.client_id }}" placeholder="eBay client_id" />
+      </div>
+      <div>
+        <label>Client Secret</label>
+        <input name="client_secret" value="{{ ebay_settings.client_secret }}" placeholder="eBay client_secret" />
+      </div>
+      <div style="grid-column: 1 / span 2;">
+        <label>Refresh Token</label>
+        <textarea name="refresh_token" rows="4" placeholder="Long-lived refresh token from eBay auth code flow">{{ ebay_settings.refresh_token }}</textarea>
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      <button class="btn btn-primary" type="submit">Save eBay Settings</button>
+    </div>
+  </form>
+</div>
+
 <div class="card">
   <h3>Categories</h3>
   <p class="muted">Use these categories for resale item classification.</p>

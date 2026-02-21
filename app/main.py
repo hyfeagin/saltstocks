@@ -366,7 +366,7 @@ def resale_create(
 # (List/create/update/delete config codes)
 # =========================
 @app.get("/config", response_class=HTMLResponse)
-def config_home(request: Request):
+def config_home(request: Request, saved_ebay: int = 0):
     conn = get_conn()
     codes = conn.execute(
         "SELECT * FROM codes ORDER BY kind ASC, code ASC"
@@ -374,10 +374,18 @@ def config_home(request: Request):
     categories = conn.execute(
         "SELECT * FROM categories ORDER BY name ASC"
     ).fetchall()
+    ebay_settings = get_ebay_settings(conn)
     conn.close()
     return templates.TemplateResponse(
         "config.html",
-        {"request": request, "codes": codes, "categories": categories},
+        {
+            "request": request,
+            "codes": codes,
+            "categories": categories,
+            "ebay_settings": ebay_settings,
+            "ebay_missing": missing_ebay_credentials(ebay_settings),
+            "saved_ebay": saved_ebay == 1,
+        },
     )
 
 
@@ -498,20 +506,8 @@ def config_category_toggle(category_id: int):
 # (Configure local eBay OAuth credentials)
 # =========================
 @app.get("/settings/ebay", response_class=HTMLResponse)
-def ebay_settings_page(request: Request, saved: int = 0):
-    conn = get_conn()
-    settings = get_ebay_settings(conn)
-    conn.close()
-
-    return templates.TemplateResponse(
-        "ebay_settings.html",
-        {
-            "request": request,
-            "settings": settings,
-            "missing": missing_ebay_credentials(settings),
-            "saved": saved == 1,
-        },
-    )
+def ebay_settings_page():
+    return RedirectResponse(url="/config#ebay-settings", status_code=303)
 
 
 @app.post("/settings/ebay")
@@ -546,7 +542,7 @@ def ebay_settings_save(
             ),
         )
     conn.close()
-    return RedirectResponse(url="/settings/ebay?saved=1", status_code=303)
+    return RedirectResponse(url="/config?saved_ebay=1#ebay-settings", status_code=303)
 # =========================
 # ANCHOR: EBAY_SETTINGS_END
 # =========================
