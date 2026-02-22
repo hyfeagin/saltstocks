@@ -631,6 +631,7 @@ def ebay_import_page(request: Request):
             "summary": None,
             "error_message": None,
             "success_message": None,
+            "status_note": None,
             "missing_credentials": missing_ebay_credentials(settings),
         },
     )
@@ -642,11 +643,19 @@ def ebay_import_run(
     start_date: str = Form(""),
     end_date: str = Form(""),
     status_filter: str = Form("PAID"),
-    dry_run: Optional[str] = Form("on"),
+    dry_run: str = Form("0"),
     action: str = Form("preview"),
 ):
     today = date.today()
     default_start = today - timedelta(days=7)
+
+    dry_run_enabled = (dry_run or "0").strip() == "1"
+    status_filter_value = (status_filter or "ANY").strip().upper() or "ANY"
+    status_note: Optional[str] = None
+    if status_filter_value != "ANY":
+        status_note = (
+            "Status filtering is coming soon for eBay getOrders; this run used date range only."
+        )
 
     try:
         start_date_value = date.fromisoformat(start_date) if start_date else default_start
@@ -660,12 +669,13 @@ def ebay_import_run(
                 "request": request,
                 "start_date": start_date_value.isoformat(),
                 "end_date": end_date_value.isoformat(),
-                "status_filter": status_filter,
-                "dry_run": True,
+                "status_filter": status_filter_value,
+                "dry_run": dry_run_enabled,
                 "preview_rows": [],
                 "summary": None,
                 "error_message": "Invalid date format. Use YYYY-MM-DD.",
                 "success_message": None,
+                "status_note": status_note,
                 "missing_credentials": [],
             },
         )
@@ -677,12 +687,13 @@ def ebay_import_run(
                 "request": request,
                 "start_date": start_date_value.isoformat(),
                 "end_date": end_date_value.isoformat(),
-                "status_filter": status_filter,
-                "dry_run": True,
+                "status_filter": status_filter_value,
+                "dry_run": dry_run_enabled,
                 "preview_rows": [],
                 "summary": None,
                 "error_message": "End date must be on or after start date.",
                 "success_message": None,
+                "status_note": status_note,
                 "missing_credentials": [],
             },
         )
@@ -702,8 +713,8 @@ def ebay_import_run(
                 "request": request,
                 "start_date": start_date_value.isoformat(),
                 "end_date": end_date_value.isoformat(),
-                "status_filter": status_filter,
-                "dry_run": True,
+                "status_filter": status_filter_value,
+                "dry_run": dry_run_enabled,
                 "preview_rows": [],
                 "summary": None,
                 "error_message": (
@@ -711,6 +722,7 @@ def ebay_import_run(
                     + ", ".join(missing_credentials)
                 ),
                 "success_message": None,
+                "status_note": status_note,
                 "missing_credentials": missing_credentials,
             },
         )
@@ -728,7 +740,13 @@ def ebay_import_run(
     try:
         start_iso, end_iso = build_iso_date_range(start_date_value, end_date_value)
         access_token = refresh_access_token(settings)
-        orders = fetch_orders(settings, access_token, start_iso, end_iso, status_filter=status_filter)
+        orders = fetch_orders(
+            settings,
+            access_token,
+            start_iso,
+            end_iso,
+            status_filter="ANY",
+        )
     except EbayIntegrationError as exc:
         conn.close()
         return templates.TemplateResponse(
@@ -737,12 +755,13 @@ def ebay_import_run(
                 "request": request,
                 "start_date": start_date_value.isoformat(),
                 "end_date": end_date_value.isoformat(),
-                "status_filter": status_filter,
-                "dry_run": True,
+                "status_filter": status_filter_value,
+                "dry_run": dry_run_enabled,
                 "preview_rows": [],
                 "summary": None,
                 "error_message": str(exc),
                 "success_message": None,
+                "status_note": status_note,
                 "missing_credentials": [],
             },
         )
@@ -837,8 +856,8 @@ def ebay_import_run(
     applied_updates = 0
     applied_logs = 0
     action_value = (action or "preview").strip().lower()
-    should_apply = action_value == "apply" and not (dry_run == "on")
-    if action_value == "apply" and dry_run == "on":
+    should_apply = action_value == "apply" and not dry_run_enabled
+    if action_value == "apply" and dry_run_enabled:
         success_message = None
         error_message = "Dry run is enabled. Uncheck 'Dry run / Preview only' to apply deductions."
     else:
@@ -893,12 +912,13 @@ def ebay_import_run(
                     "request": request,
                     "start_date": start_date_value.isoformat(),
                     "end_date": end_date_value.isoformat(),
-                    "status_filter": status_filter,
-                    "dry_run": False,
+                    "status_filter": status_filter_value,
+                    "dry_run": dry_run_enabled,
                     "preview_rows": preview_rows,
                     "summary": None,
                     "error_message": f"Apply failed. No deductions were committed: {exc}",
                     "success_message": None,
+                    "status_note": status_note,
                     "missing_credentials": [],
                 },
             )
@@ -921,12 +941,13 @@ def ebay_import_run(
             "request": request,
             "start_date": start_date_value.isoformat(),
             "end_date": end_date_value.isoformat(),
-            "status_filter": status_filter,
-            "dry_run": not should_apply,
+            "status_filter": status_filter_value,
+            "dry_run": dry_run_enabled,
             "preview_rows": preview_rows,
             "summary": summary,
             "error_message": error_message,
             "success_message": success_message,
+            "status_note": status_note,
             "missing_credentials": [],
         },
     )

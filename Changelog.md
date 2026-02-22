@@ -72,3 +72,31 @@ Committed and pushed via required script:
 - `./scripts/done.sh "S0-T0: support separate eBay sandbox and production credential profiles"`
 - Push succeeded to `main`
 - Commit hash: `89ece2a`
+
+## eBay Import Bugfixes (Filter + Dry Run)
+
+### What Changed
+- Fixed eBay `getOrders` filter construction to avoid invalid `orderfulfillmentstatus:{COMPLETED}` requests.
+- For MVP safety, status filtering is now ignored server-side and requests always use date-range filtering only.
+- Added explicit UI note that status filtering is coming soon.
+- Improved eBay API error reporting to include `status_code` and response body text for failed OAuth/order calls.
+- Fixed dry-run form parsing by using hidden+checkbox values:
+  - hidden `dry_run=0`
+  - checkbox `dry_run=1`
+- Updated backend parsing so dry run is `True` only when `dry_run == "1"`.
+
+### Behavior Covered
+- Status dropdown values (including `COMPLETED`) no longer produce invalid fulfillment-status filters.
+- `ANY` works with date-range-only requests.
+- Preview continues to work.
+- Apply works when dry run is unchecked (no automatic re-check/re-block).
+
+### Validation Run
+- `.venv/bin/python -m py_compile /Users/hollyfeagin/Documents/saltstocks/app/main.py /Users/hollyfeagin/Documents/saltstocks/app/integrations/ebay.py`
+- Local app startup/shutdown via uvicorn succeeded.
+
+### Next Steps
+1. Verify in UI with status `ANY` and date range that includes orders.
+2. Preview import and confirm summary renders.
+3. Uncheck `Dry run / Preview only` and click `Apply deductions`.
+4. Re-run preview to confirm already-imported idempotency still holds.

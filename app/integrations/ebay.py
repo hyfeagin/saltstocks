@@ -63,7 +63,10 @@ def refresh_access_token(settings: EbaySettings, timeout_seconds: int = 20) -> s
 
     if response.status_code >= 400:
         message = _best_error_message(response)
-        raise EbayIntegrationError(f"Token refresh failed ({response.status_code}): {message}")
+        body = (response.text or "").strip()
+        raise EbayIntegrationError(
+            f"Token refresh failed ({response.status_code}): {message}. Response body: {body[:1000]}"
+        )
 
     payload = response.json()
     access_token = payload.get("access_token")
@@ -86,15 +89,10 @@ def fetch_orders(
     base_url = get_api_base(settings.environment)
     endpoint = f"{base_url}/sell/fulfillment/v1/order"
 
+    # NOTE: For MVP we use date-only filtering. We intentionally skip status filters
+    # until we add a confirmed mapping of UI statuses to eBay getOrders filters.
+    # This avoids invalid calls like orderfulfillmentstatus:{COMPLETED} (400).
     clauses = [f"creationdate:[{created_from_iso}..{created_to_iso}]"]
-    status_value = (status_filter or "").strip().upper()
-    payment_statuses = {"PAID", "NOT_PAID", "PENDING", "FAILED"}
-
-    if status_value and status_value != "ANY":
-        if status_value in payment_statuses:
-            clauses.append(f"orderpaymentstatus:{{{status_value}}}")
-        else:
-            clauses.append(f"orderfulfillmentstatus:{{{status_value}}}")
 
     filter_value = ",".join(clauses)
 
@@ -121,8 +119,10 @@ def fetch_orders(
 
         if response.status_code >= 400:
             message = _best_error_message(response)
+            body = (response.text or "").strip()
             raise EbayIntegrationError(
-                f"eBay getOrders failed ({response.status_code}) for filter '{filter_value}': {message}"
+                f"eBay getOrders failed ({response.status_code}) for filter '{filter_value}': "
+                f"{message}. Response body: {body[:1000]}"
             )
 
         payload = response.json()

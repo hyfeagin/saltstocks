@@ -25,6 +25,12 @@
 </div>
 {% endif %}
 
+{% if status_note %}
+<div class="card" style="border-color:#caa46a;">
+  <b>Note:</b> {{ status_note }}
+</div>
+{% endif %}
+
 <div class="card">
   <form method="post" action="/ebay/import">
     <div class="row">
@@ -45,9 +51,11 @@
         </select>
       </div>
       <div style="align-self:end;">
-        <label><input type="checkbox" name="dry_run" value="on" {{ 'checked' if dry_run else '' }} /> Dry run / Preview only</label>
+        <input type="hidden" name="dry_run" value="0" />
+        <label><input type="checkbox" name="dry_run" value="1" {{ 'checked' if dry_run else '' }} /> Dry run / Preview only</label>
       </div>
     </div>
+    <p class="muted">Status filtering coming soon; currently imports use date range only.</p>
 
     <div style="margin-top:12px; display:flex; gap:8px;">
       <button class="btn" type="submit" name="action" value="preview">Preview</button>
