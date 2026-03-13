@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .db import get_conn, init_db, DB_PATH
+from .migrate import migrate
 from .integrations.ebay import (
     EbayIntegrationError,
     EbaySettings,
@@ -199,6 +200,7 @@ def extract_line_item_qty(line: Dict[str, Any]) -> float:
 @app.on_event("startup")
 def _startup():
     init_db()
+    migrate()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 # =========================
 # ANCHOR: STARTUP_INIT_DB_END
