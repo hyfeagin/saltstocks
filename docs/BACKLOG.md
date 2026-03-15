@@ -232,3 +232,113 @@ Include: **TOTAL OWED TO HOLLY**
 - UI shows summary before confirming
 
 **Files:** `app/main.py` (line 1354–1674), `app/templates/resale_list.html`
+
+---
+
+### [ ] eBay Deep Integration — Status Sync + Listing Creation
+
+**Goal:** Two-way eBay integration: sync item status from eBay (listed/unlisted) back into SaltStocks, and allow listing a new item for sale directly from SaltStocks.
+
+**Phase 1 — Status Sync:**
+- Pull current listing status from eBay and update `resale_listings.status` (listed, unlisted, sold) for matched SKUs
+- Run on demand (manual pull, same pattern as order import)
+- Preview changes before applying
+
+**Phase 2 — List Item from SaltStocks:**
+- From an item's detail/edit page, trigger a "List on eBay" action
+- Collect required eBay listing fields: title, description, price, condition, images, category, shipping details
+- Submit via eBay Trading or Inventory API and store the resulting listing ID
+- Update `resale_listings` with channel=ebay, status=listed, url
+
+**Open questions:**
+- eBay Inventory API vs. legacy Trading API — which is available on the current credentials?
+- Image hosting: eBay requires publicly accessible URLs; local images need to be uploaded to eBay's image hosting first
+- How much of the listing form should mirror the SaltStocks item form vs. be a separate eBay-specific step?
+
+**Files:** `app/integrations/ebay.py`, `app/main.py`, `app/templates/`
+
+---
+
+### [ ] Inventory List Filters
+
+**Goal:** Allow filtering the resale inventory list by one or more criteria beyond the current text search.
+
+**Acceptance criteria:**
+- Filter controls for: status (unlisted, listed, sold, etc.), channel (eBay, Etsy, local, etc.), condition, category, location, and tag
+- Filters are additive (AND logic) and persist across the current session
+- Filter state is reflected in the URL query string so results are shareable/bookmarkable
+- Works alongside the existing search box
+
+**Files:** `app/main.py` (resale_list route), `app/templates/resale_list.html`
+
+---
+
+### [ ] Search Clear Button (×)
+
+**Goal:** Add a one-click clear button to the search box so users don't have to manually erase the search term and resubmit.
+
+**Acceptance criteria:**
+- An × button appears inside or beside the search input when the field is non-empty
+- Clicking × clears the input and immediately reloads the list showing all items (no manual re-submit)
+- Works without JavaScript frameworks — plain JS or an HTML form reset is fine
+
+**Files:** `app/templates/resale_list.html`
+
+---
+
+### [ ] Reporting Dashboard
+
+**Goal:** A dedicated dashboard page showing key business metrics at a glance.
+
+**Suggested metrics (v1):**
+- Total items in inventory, broken down by status (unlisted / listed / sold / donated / trashed)
+- Total inventory value (qty × unit_cost) by business unit
+- Items added this week / this month
+- Top categories by item count
+- eBay import history summary (last import date, total deductions applied)
+
+**Acceptance criteria:**
+- Accessible from the top nav
+- All data pulled from SQLite — no external calls
+- Loads fast; no heavy aggregation queries
+
+**Files:** new route in `app/main.py`, new template `app/templates/dashboard.html`, update `app/templates/base.html` nav
+
+---
+
+### [ ] Umivera COGS — Materials, Recipes & Batch Costing
+
+**Goal:** Build the production cost tracking side of SaltStocks for Umivera bath salt products. Track what materials go into each product, calculate cost per unit, and record production batches.
+
+**Data model:**
+- `materials` table — ingredient inventory (name, unit, unit_cost, qty_on_hand)
+- `recipes` table — each Umivera product SKU has a recipe
+- `recipe_lines` table — (recipe_id, material_id, qty_per_batch)
+- `batches` table — a production run (recipe_id, batch_size, date, notes)
+- On batch save: deduct material qty, calculate total COGS, record cost per unit on the finished item
+
+**Acceptance criteria:**
+- Can define a recipe for a product (e.g., "16oz Lavender Bath Salts" uses X oz salt, Y oz oil, Z jar)
+- Can record a batch (units produced, date)
+- COGS per unit is calculated and stored on the item record
+- Material stock is decremented when a batch is recorded
+- Report shows COGS per batch and per unit
+
+**Files:** new tables in `app/migrate.py`, new routes + templates, separate from resale flows
+
+---
+
+### [ ] Auto-Launch on Mac (Terminal Double-Click)
+
+**Goal:** Make it easy to start SaltStocks without opening Terminal and typing commands — double-click a file to launch.
+
+**Acceptance criteria:**
+- A `.command` file (or `.app` wrapper) in the project root starts the venv, runs the server, and opens the browser automatically
+- If the server is already running, it should not start a second instance (check port 8000 before launching)
+- Works on macOS without installing anything extra
+
+**Notes:**
+- `run.command` already exists but only starts uvicorn — extend it to also open the browser and add the port check
+- Consider adding a matching stop script or using `lsof -ti:8000` to detect existing instance
+
+**Files:** `run.command`
