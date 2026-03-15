@@ -4,6 +4,33 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [1.5.0] — 2026-03-15
+
+### Refactored — Router Split (main.py → modular routers)
+
+- Split monolithic `app/main.py` (1,694 lines) into four focused router modules:
+  - `app/routers/dashboard.py` — dashboard and backup routes
+  - `app/routers/resale.py` — all `/resale/*` routes (list, create, edit, adjust, bulk update, CSV import/export)
+  - `app/routers/config.py` — all `/config/*` and `/settings/ebay` routes
+  - `app/routers/ebay.py` — all `/ebay/*` routes with a shared error-response helper
+- Extracted shared code into two new modules:
+  - `app/deps.py` — shared `templates` object, `BACKUP_DIR`, and `TEMPLATES_DIR`
+  - `app/utils.py` — shared helper functions: `normalize_code`, `get_next_sku`, `get_ebay_profile_bundle`, `missing_ebay_credentials`, and eBay line-item extraction helpers
+- `app/main.py` reduced to 26 lines (app setup + startup hook only)
+
+### Fixed — CSV Export `brand` Column Crash
+
+- Removed `i.brand` from the CSV export query and header row; replaced with `brand_code` which is the correct column name in the `items` table. Previously, any CSV export would crash at runtime with a "no such column" error.
+
+### Changed — DEV_GUIDE Rewritten
+
+- Removed ~450 lines of duplicate and outdated content (old "Codex" workflow, Option A/B sections, emoji commentary)
+- Updated migration section to reflect that `migrate()` now runs automatically on startup
+- Added "Adding a New Integration" section using the eBay pattern as a reference template
+- Consolidated troubleshooting into a clean reference section
+
+---
+
 ## [1.4.0] — 2026-03-13
 
 ### Added — Project Backlog

@@ -171,7 +171,7 @@ Include: **TOTAL OWED TO HOLLY**
 
 ---
 
-### [ ] Fix CSV Export — Remove Non-Existent `brand` Column
+### [x] Fix CSV Export — Remove Non-Existent `brand` Column
 
 **Priority:** High — runtime crash
 
