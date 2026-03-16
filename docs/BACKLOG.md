@@ -342,3 +342,170 @@ Include: **TOTAL OWED TO HOLLY**
 - Consider adding a matching stop script or using `lsof -ti:8000` to detect existing instance
 
 **Files:** `run.command`
+
+---
+
+## Code Quality / Refactoring Backlog
+
+These are internal improvements with no user-visible behavior change. Safe to do incrementally.
+
+---
+
+### [ ] DB Connection Dependency Injection
+
+**Priority:** High — resource safety + DRY
+
+**Goal:** Replace the manual `conn = get_conn()` / `conn.close()` pattern (repeated ~22 times across routers) with a FastAPI `Depends()` dependency that auto-closes the connection at end of request, making connection leaks impossible.
+
+**Approach:**
+```python
+# app/deps.py
+def get_db():
+    conn = get_conn()
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+# In each route:
+@router.get("/resale")
+def resale_list(request: Request, conn = Depends(get_db)):
+    ...  # no manual conn.close() needed
+```
+
+**Files:** `app/deps.py`, all files in `app/routers/`
+
+---
+
+### [ ] `clean_str()` Helper for Strip-or-None Pattern
+
+**Priority:** High — DRY
+
+**Goal:** Replace the `value.strip() or None` pattern (43+ occurrences across routers) with a shared helper in `app/utils.py`.
+
+**Approach:**
+```python
+def clean_str(val: str, default: Optional[str] = None) -> Optional[str]:
+    cleaned = (val or "").strip()
+    return default if not cleaned else cleaned
+```
+
+**Files:** `app/utils.py`, `app/routers/resale.py`, `app/routers/config.py`
+
+---
+
+### [ ] Constants File for Status/Channel/Environment Values
+
+**Priority:** High — single source of truth
+
+**Goal:** Move all hardcoded string enums (`"unlisted"`, `"unassigned"`, `"ebay"`, `"SANDBOX"`, `"resale"`, etc.) into a single `app/constants.py` file so they can be changed in one place and imported everywhere.
+
+**Approach:**
+```python
+# app/constants.py
+RESALE_STATUSES = ["unlisted", "listed", "sold", "donated", "trashed"]
+RESALE_CHANNELS = ["unassigned", "ebay", "etsy", "shopify", "local", "mercari", "whatnot"]
+EBAY_ENVIRONMENTS = ["SANDBOX", "PRODUCTION"]
+ITEM_TYPE_RESALE = "resale"
+```
+
+**Files:** new `app/constants.py`, `app/routers/resale.py`, `app/routers/config.py`, `app/routers/ebay.py`, `app/templates/resale_form.html`, `app/templates/resale_list.html`
+
+---
+
+### [ ] Extract Resale JOIN Query Helper
+
+**Priority:** High — eliminates copy-paste SQL
+
+**Goal:** The same `SELECT i.* LEFT JOIN resale_listings` query appears 4+ times across routers with minor variations. Extract into a shared helper in `app/utils.py`.
+
+**Approach:**
+```python
+def fetch_resale_item_by_id(conn, item_id: int):
+    return conn.execute("""
+        SELECT i.*, COALESCE(rl.status,'unlisted') AS status, ...
+        FROM items i LEFT JOIN resale_listings rl ON rl.item_id = i.id
+        WHERE i.id=? AND i.item_type='resale'
+    """, (item_id,)).fetchone()
+```
+
+**Files:** `app/utils.py`, `app/routers/resale.py`
+
+---
+
+### [ ] `upsert_resale_listing()` Helper
+
+**Priority:** Medium — eliminates ~60 lines of duplicate insert/update logic
+
+**Goal:** The insert-or-update pattern for `resale_listings` is copy-pasted in resale create, update, bulk update, and CSV import (~4 locations). Extract into a shared helper.
+
+**Approach:**
+```python
+def upsert_resale_listing(conn, item_id, channel, status, list_price, url):
+    existing = conn.execute("SELECT id FROM resale_listings WHERE item_id=?", (item_id,)).fetchone()
+    if existing:
+        conn.execute("UPDATE resale_listings SET channel=?, status=?, list_price=?, url=?, updated_at=datetime('now') WHERE item_id=?", ...)
+    else:
+        conn.execute("INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)", ...)
+```
+
+**Files:** `app/utils.py`, `app/routers/resale.py`
+
+---
+
+### [ ] Jinja2 Macros for Status/Channel Dropdowns
+
+**Priority:** Medium — template DRY
+
+**Goal:** The status and channel `<select>` dropdowns are hardcoded identically in `resale_form.html` and `resale_list.html`. Extract into reusable Jinja2 macros.
+
+**Approach:** Create `app/templates/macros.html` with `status_dropdown` and `channel_dropdown` macros. Import and call them in both templates.
+
+**Files:** new `app/templates/macros.html`, `app/templates/resale_form.html`, `app/templates/resale_list.html`
+
+---
+
+### [ ] Standardize Float Parsing in CSV Import
+
+**Priority:** Medium — correctness + consistency
+
+**Goal:** The bulk update handler silently ignores invalid float values, while CSV import raises an error. Unify both using a single `safe_parse_float()` helper in `app/utils.py`.
+
+**Files:** `app/utils.py`, `app/routers/resale.py`
+
+---
+
+### [ ] `normalize_code()` Default Parameter
+
+**Priority:** Low — minor cleanup
+
+**Goal:** `normalize_code(value) or "GV"` appears ~20 times. Add a `default` parameter to the function to eliminate the `or` pattern at every call site.
+
+**Approach:**
+```python
+def normalize_code(s: str, default: str = "") -> str:
+    ...
+    return result if result else default
+
+# Usage becomes:
+company_n = normalize_code(company, "GV")
+```
+
+**Files:** `app/utils.py`, `app/routers/resale.py`
+
+---
+
+### [ ] `render()` Template Response Shorthand
+
+**Priority:** Low — minor boilerplate reduction
+
+**Goal:** Replace the repeated `templates.TemplateResponse("name.html", {"request": request, ...})` pattern (~15 occurrences) with a one-liner helper.
+
+**Approach:**
+```python
+# app/deps.py
+def render(template_name: str, request: Request, **context):
+    return templates.TemplateResponse(template_name, {"request": request, **context})
+```
+
+**Files:** `app/deps.py`, all router files
