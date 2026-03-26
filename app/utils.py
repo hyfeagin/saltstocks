@@ -42,6 +42,7 @@ def _empty_ebay_profile() -> Dict[str, Optional[str]]:
         "client_id": "",
         "client_secret": "",
         "refresh_token": "",
+        "ru_name": "",
         "updated_at": None,
     }
 
@@ -61,7 +62,7 @@ def get_ebay_profile_bundle(conn: sqlite3.Connection) -> Dict[str, Any]:
             active_environment = "SANDBOX"
 
         rows = conn.execute(
-            "SELECT environment, client_id, client_secret, refresh_token, updated_at FROM ebay_credentials"
+            "SELECT environment, client_id, client_secret, refresh_token, ru_name, updated_at FROM ebay_credentials"
         ).fetchall()
         for row in rows:
             env = (row["environment"] or "").upper()
@@ -70,6 +71,7 @@ def get_ebay_profile_bundle(conn: sqlite3.Connection) -> Dict[str, Any]:
                     "client_id": row["client_id"] or "",
                     "client_secret": row["client_secret"] or "",
                     "refresh_token": row["refresh_token"] or "",
+                    "ru_name": row["ru_name"] or "",
                     "updated_at": row["updated_at"],
                 }
     except sqlite3.OperationalError:

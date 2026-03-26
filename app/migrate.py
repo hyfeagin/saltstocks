@@ -144,9 +144,11 @@ def migrate():
               client_id TEXT,
               client_secret TEXT,
               refresh_token TEXT,
+              ru_name TEXT,
               updated_at TEXT NOT NULL DEFAULT (datetime('now'))
             )
             """)
+        ensure_column(conn, "ebay_credentials", "ru_name", "ru_name TEXT")
 
         # Active environment selector (which credential set should be used)
         if not table_exists(conn, "ebay_state"):

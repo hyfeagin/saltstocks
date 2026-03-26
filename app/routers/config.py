@@ -15,7 +15,7 @@ router = APIRouter()
 # (List/create/update/delete config codes)
 # =========================
 @router.get("/config", response_class=HTMLResponse)
-def config_home(request: Request, saved_ebay: int = 0):
+def config_home(request: Request, saved_ebay: int = 0, oauth: int = 0):
     conn = get_conn()
     codes = conn.execute(
         "SELECT * FROM codes ORDER BY kind ASC, code ASC"
@@ -36,6 +36,7 @@ def config_home(request: Request, saved_ebay: int = 0):
             "ebay_settings": ebay_bundle["active_profile"],
             "ebay_missing": missing_ebay_credentials(ebay_bundle["active_profile"]),
             "saved_ebay": saved_ebay == 1,
+            "oauth_success": oauth == 1,
         },
     )
 
@@ -168,6 +169,7 @@ def ebay_settings_save(
     client_secret: str = Form(""),
     environment: str = Form("SANDBOX"),
     refresh_token: str = Form(""),
+    ru_name: str = Form(""),
 ):
     env_value = (environment or "SANDBOX").strip().upper()
     if env_value not in {"PRODUCTION", "SANDBOX"}:
@@ -177,12 +179,13 @@ def ebay_settings_save(
     with conn:
         conn.execute(
             """
-            INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, updated_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
+            INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, ru_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(environment) DO UPDATE SET
               client_id=excluded.client_id,
               client_secret=excluded.client_secret,
               refresh_token=excluded.refresh_token,
+              ru_name=excluded.ru_name,
               updated_at=datetime('now')
             """,
             (
@@ -190,6 +193,7 @@ def ebay_settings_save(
                 (client_id or "").strip(),
                 (client_secret or "").strip(),
                 (refresh_token or "").strip(),
+                (ru_name or "").strip(),
             ),
         )
         conn.execute(

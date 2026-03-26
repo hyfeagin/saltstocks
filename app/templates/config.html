@@ -7,7 +7,11 @@
   <h3>eBay Settings</h3>
   <p class="muted">Store OAuth credentials locally for pull-based order import.</p>
 
-  {% if saved_ebay %}
+  {% if oauth_success %}
+  <div class="card" style="border-color:#89b48f;">
+    <b>Connected!</b> eBay refresh token was saved successfully. You can now sync eBay orders.
+  </div>
+  {% elif saved_ebay %}
   <div class="card" style="border-color:#89b48f;">
     <b>Saved.</b> eBay settings were updated.
   </div>
@@ -41,15 +45,21 @@
         <input id="ebay-client-secret" name="client_secret" value="{{ ebay_settings.client_secret }}" placeholder="eBay client_secret" />
       </div>
       <div style="grid-column: 1 / span 2;">
-        <label>Refresh Token</label>
+        <label>RuName <span class="muted">(from eBay developer portal → redirect URI)</span></label>
+        <input id="ebay-ru-name" name="ru_name" value="{{ ebay_settings.ru_name }}" placeholder="YourName-AppName-PRD-xxxxxxxx-xxxxxxxx" />
+        <div class="muted">Register <code>http://localhost:8000/ebay/oauth/callback</code> as a redirect URI in your eBay app, then paste the generated RuName here.</div>
+      </div>
+      <div style="grid-column: 1 / span 2;">
+        <label>Refresh Token <span class="muted">(auto-filled after connecting below, or paste manually)</span></label>
         <textarea id="ebay-refresh-token" name="refresh_token" rows="4" placeholder="Long-lived refresh token from eBay auth code flow">{{ ebay_settings.refresh_token }}</textarea>
       </div>
     </div>
-    <div style="margin-top:12px;">
+    <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <button class="btn btn-primary" type="submit">Save eBay Settings</button>
+      <a href="/ebay/oauth/start" class="btn" style="text-decoration:none;">Connect to eBay (Get New Token)</a>
     </div>
   </form>
-  <p class="muted">Each environment keeps its own credentials. Switching the dropdown loads that environment's saved values.</p>
+  <p class="muted">Each environment keeps its own credentials. Switching the dropdown loads that environment's saved values. Save your Client ID, Client Secret, and RuName first, then click <b>Connect to eBay</b> to authorize and get a fresh refresh token.</p>
 </div>
 
 <div class="card">
@@ -184,12 +194,14 @@
     const clientId = document.getElementById("ebay-client-id");
     const clientSecret = document.getElementById("ebay-client-secret");
     const refreshToken = document.getElementById("ebay-refresh-token");
+    const ruName = document.getElementById("ebay-ru-name");
 
     function applyProfile(env) {
       const profile = profiles[env] || {};
       clientId.value = profile.client_id || "";
       clientSecret.value = profile.client_secret || "";
       refreshToken.value = profile.refresh_token || "";
+      ruName.value = profile.ru_name || "";
     }
 
     envSelect.addEventListener("change", function() {

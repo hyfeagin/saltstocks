@@ -88,6 +88,51 @@ Recommended habit:
 - Backup at the start of a work session
 - Backup at the end of a work session
 
+## eBay Integration
+
+### One-time setup (per environment)
+
+Before you can sync eBay orders you need to connect the app to your eBay developer account. You only have to do this once per environment (Sandbox / Production), or again any time your refresh token expires (~18 months).
+
+**Prerequisites — do this in the eBay developer portal first:**
+1. Sign in at developer.ebay.com → **Hi [name] → Application Access Keys**
+2. Open your app and go to **User Tokens**
+3. Under **OAuth**, add `https://localhost:8000/ebay/oauth/callback` as an accepted redirect URL
+4. Note the **RuName** eBay generates (looks like `YourName-AppName-PRD-xxxxxxxx`)
+
+**In SaltStocks:**
+1. Go to **Config → eBay Settings**
+2. Set the **Environment** (SANDBOX or PRODUCTION)
+3. Enter your **Client ID** and **Client Secret** from the eBay developer portal
+4. Paste the **RuName** into the RuName field
+5. Click **Save eBay Settings**
+
+### Getting / refreshing your token
+
+1. From **Config → eBay Settings**, click **Connect to eBay (Get New Token)**
+2. Click **Open eBay Authorization Page** — eBay opens in a new tab
+3. Sign in with your eBay seller account and click **Agree**
+4. Your browser will try to redirect to `https://localhost:8000/...` and show a **connection error** — this is expected
+5. **Copy the full URL from your browser's address bar** (it will contain `?code=` in it)
+6. Paste it into the form and click **Exchange Code & Save Token**
+7. You'll land back on the Config page with a green "Connected!" banner
+
+The refresh token is now saved and will be used for all future eBay syncs.
+
+> **Tip:** eBay auth codes expire after ~5 minutes. If you get a token exchange error, go back to step 1 and generate a fresh code.
+
+### Syncing eBay sold orders
+
+Once connected, go to **eBay → Import Orders**:
+1. Set the date range (defaults to last 7 days)
+2. Leave **Dry run** checked to preview deductions without applying them
+3. Review the preview table — items show as `matched`, `unmatched`, or `already imported`
+4. Uncheck **Dry run** and click **Apply** to deduct quantities from inventory
+
+Deductions are idempotent — importing the same order twice will not double-deduct.
+
+---
+
 ## CSV import/export (new items + updates)
 Use **Export CSV** on the Resale Inventory page to get a template that you can edit in Excel/Sheets.
 

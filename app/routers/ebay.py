@@ -19,7 +19,9 @@ from ..utils import (
 from ..integrations.ebay import (
     EbayIntegrationError,
     EbaySettings,
+    build_auth_url,
     build_iso_date_range,
+    exchange_code_for_tokens,
     fetch_orders,
     refresh_access_token,
 )
@@ -57,6 +59,150 @@ def _ebay_import_response(
             "missing_credentials": missing_credentials or [],
         },
     )
+
+
+# =========================
+# ANCHOR: EBAY_OAUTH_BEGIN
+# (OAuth2 authorization code flow — get/refresh the user refresh token)
+# =========================
+@router.get("/ebay/oauth/start", response_class=HTMLResponse)
+def ebay_oauth_start(request: Request):
+    """Show the eBay auth URL and a form to paste the redirect URL back."""
+    conn = get_conn()
+    ebay_bundle = get_ebay_profile_bundle(conn)
+    profile = ebay_bundle["active_profile"]
+    env = ebay_bundle["active_environment"]
+    conn.close()
+
+    ru_name = (profile.get("ru_name") or "").strip()
+    missing = missing_ebay_credentials(profile)
+    missing_for_start = [f for f in missing if f != "refresh_token"]
+
+    if missing_for_start or not ru_name:
+        missing_fields = missing_for_start + (["ru_name"] if not ru_name else [])
+        return templates.TemplateResponse(
+            "ebay_oauth_error.html",
+            {
+                "request": request,
+                "error_message": (
+                    "Cannot start OAuth flow — missing required fields: "
+                    + ", ".join(missing_fields)
+                    + ". Save Client ID, Client Secret, and RuName in Settings first."
+                ),
+                "environment": env,
+            },
+        )
+
+    settings = EbaySettings(
+        client_id=profile["client_id"] or "",
+        client_secret=profile["client_secret"] or "",
+        environment=env,
+        refresh_token="",
+    )
+    try:
+        auth_url = build_auth_url(settings, ru_name)
+    except EbayIntegrationError as exc:
+        return templates.TemplateResponse(
+            "ebay_oauth_error.html",
+            {"request": request, "error_message": str(exc), "environment": env},
+        )
+
+    return templates.TemplateResponse(
+        "ebay_oauth_start.html",
+        {"request": request, "auth_url": auth_url, "environment": env},
+    )
+
+
+@router.post("/ebay/oauth/exchange", response_class=HTMLResponse)
+def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
+    """Parse the code from the pasted redirect URL and exchange it for tokens."""
+    import urllib.parse as _up
+
+    redirect_url = (redirect_url or "").strip()
+    if not redirect_url:
+        return templates.TemplateResponse(
+            "ebay_oauth_error.html",
+            {"request": request, "error_message": "No URL pasted.", "environment": ""},
+        )
+
+    # Accept either a full URL or just the raw code.
+    # eBay codes contain '#' chars (encoded as %23 in the URL). Browsers often
+    # decode %23 → # in the address bar, which makes urlparse treat the rest of
+    # the code as a URL fragment and silently drop it. We extract the code with
+    # a raw string search so # is treated as part of the value, not a delimiter.
+    code = ""
+    error = ""
+    if redirect_url.startswith("http"):
+        # Check for error param first (safe to use urlparse here, errors are simple)
+        try:
+            parsed = _up.urlparse(redirect_url)
+            qs = _up.parse_qs(parsed.query)
+            error = qs.get("error", [""])[0]
+        except Exception:
+            pass
+
+        # Extract code robustly: find 'code=' and take everything up to next '&'
+        raw = redirect_url
+        code_marker = "code="
+        idx = raw.find(code_marker)
+        if idx != -1:
+            start = idx + len(code_marker)
+            end = raw.find("&", start)
+            raw_code = raw[start:] if end == -1 else raw[start:end]
+            code = _up.unquote(raw_code)
+    else:
+        code = _up.unquote(redirect_url)  # user pasted just the code
+
+    if error:
+        return templates.TemplateResponse(
+            "ebay_oauth_error.html",
+            {"request": request, "error_message": f"eBay returned an error: {error}", "environment": ""},
+        )
+    if not code:
+        return templates.TemplateResponse(
+            "ebay_oauth_error.html",
+            {"request": request, "error_message": "Could not find a code in the pasted URL.", "environment": ""},
+        )
+
+    conn = get_conn()
+    ebay_bundle = get_ebay_profile_bundle(conn)
+    profile = ebay_bundle["active_profile"]
+    env = ebay_bundle["active_environment"]
+    ru_name = (profile.get("ru_name") or "").strip()
+
+    settings = EbaySettings(
+        client_id=profile["client_id"] or "",
+        client_secret=profile["client_secret"] or "",
+        environment=env,
+        refresh_token="",
+    )
+    try:
+        _, refresh_token = exchange_code_for_tokens(settings, ru_name, code)
+    except EbayIntegrationError as exc:
+        conn.close()
+        return templates.TemplateResponse(
+            "ebay_oauth_error.html",
+            {"request": request, "error_message": str(exc), "environment": env},
+        )
+
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, ru_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(environment) DO UPDATE SET
+              refresh_token=excluded.refresh_token,
+              updated_at=datetime('now')
+            """,
+            (env, profile["client_id"] or "", profile["client_secret"] or "", refresh_token, ru_name),
+        )
+    conn.close()
+
+    from fastapi.responses import RedirectResponse as _Redirect
+    return _Redirect("/config?saved_ebay=1&oauth=1#ebay-settings", status_code=303)
+# =========================
+# ANCHOR: EBAY_OAUTH_END
+# =========================
 
 
 # =========================

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import urllib.parse
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
 OAUTH_ENDPOINT = "https://api.ebay.com/identity/v1/oauth2/token"
+OAUTH_ENDPOINT_SANDBOX = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
+
+AUTH_ENDPOINT = "https://auth.ebay.com/oauth2/authorize"
+AUTH_ENDPOINT_SANDBOX = "https://auth.sandbox.ebay.com/oauth2/authorize"
+
+FULFILLMENT_SCOPE = "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly"
 
 
 class EbayIntegrationError(Exception):
@@ -74,6 +81,78 @@ def refresh_access_token(settings: EbaySettings, timeout_seconds: int = 20) -> s
         raise EbayIntegrationError("Token refresh succeeded but no access token was returned.")
 
     return access_token
+
+
+def build_auth_url(settings: EbaySettings, ru_name: str) -> str:
+    """Build the eBay OAuth2 authorization URL the user must visit to grant access."""
+    if not ru_name or not ru_name.strip():
+        raise EbayIntegrationError("RuName is required to start the OAuth flow.")
+    if not settings.client_id or not settings.client_id.strip():
+        raise EbayIntegrationError("Client ID is required to start the OAuth flow.")
+    env = (settings.environment or "SANDBOX").upper()
+    base = AUTH_ENDPOINT if env == "PRODUCTION" else AUTH_ENDPOINT_SANDBOX
+    params = {
+        "client_id": settings.client_id.strip(),
+        "redirect_uri": ru_name.strip(),
+        "response_type": "code",
+        "scope": FULFILLMENT_SCOPE,
+    }
+    return f"{base}?{urllib.parse.urlencode(params)}"
+
+
+def exchange_code_for_tokens(
+    settings: EbaySettings,
+    ru_name: str,
+    code: str,
+    timeout_seconds: int = 20,
+) -> Tuple[str, str]:
+    """Exchange an authorization code for (access_token, refresh_token).
+
+    Returns a tuple of (access_token, refresh_token).
+    """
+    client_id = (settings.client_id or "").strip()
+    client_secret = (settings.client_secret or "").strip()
+    if not client_id or not client_secret:
+        raise EbayIntegrationError("client_id and client_secret are required.")
+    if not ru_name or not ru_name.strip():
+        raise EbayIntegrationError("RuName is required.")
+    if not code or not code.strip():
+        raise EbayIntegrationError("Authorization code is required.")
+
+    env = (settings.environment or "SANDBOX").upper()
+    endpoint = OAUTH_ENDPOINT if env == "PRODUCTION" else OAUTH_ENDPOINT_SANDBOX
+
+    try:
+        response = requests.post(
+            endpoint,
+            auth=(client_id, client_secret),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "authorization_code",
+                "code": code.strip(),
+                "redirect_uri": ru_name.strip(),
+            },
+            timeout=timeout_seconds,
+        )
+    except requests.RequestException as exc:
+        raise EbayIntegrationError(f"Unable to reach eBay OAuth endpoint: {exc}") from exc
+
+    if response.status_code >= 400:
+        message = _best_error_message(response)
+        body = (response.text or "").strip()
+        raise EbayIntegrationError(
+            f"Token exchange failed ({response.status_code}): {message}. Response body: {body[:1000]}"
+        )
+
+    payload = response.json()
+    access_token = payload.get("access_token")
+    refresh_token = payload.get("refresh_token")
+    if not access_token:
+        raise EbayIntegrationError("Token exchange succeeded but no access_token was returned.")
+    if not refresh_token:
+        raise EbayIntegrationError("Token exchange succeeded but no refresh_token was returned.")
+
+    return access_token, refresh_token
 
 
 def fetch_orders(

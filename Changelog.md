@@ -4,6 +4,20 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [1.6.0] — 2026-03-25
+
+### Added — eBay OAuth In-App Token Flow
+
+- New **Connect to eBay** button on the Settings → eBay section launches a guided OAuth flow entirely within the app — no terminal scripts or manual token exchange required.
+- `/ebay/oauth/start` builds the eBay authorization URL from saved credentials and presents a paste-back form for the redirect URL.
+- `/ebay/oauth/exchange` receives the pasted redirect URL, extracts the authorization code, exchanges it for tokens via eBay's OAuth endpoint, and saves the new refresh token directly to the database.
+- Robust code extraction handles eBay's `#`-containing auth codes correctly — browsers that decode `%23` to `#` in the address bar no longer produce a truncated/invalid code.
+- New `ru_name` field added to `ebay_credentials` table (migration auto-runs on startup). RuName is required for the OAuth flow and stored per environment.
+- Error pages at `ebay_oauth_error.html` and `ebay_oauth_start.html` give clear feedback if credentials are missing or eBay returns an error.
+- Config page updated: RuName input, inline setup instructions, and environment-aware JS profile switcher now includes `ru_name`.
+
+---
+
 ## [1.5.0] — 2026-03-15
 
 ### Refactored — Router Split (main.py → modular routers)
