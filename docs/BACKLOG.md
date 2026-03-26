@@ -328,7 +328,7 @@ Include: **TOTAL OWED TO HOLLY**
 
 ---
 
-### [ ] Auto-Launch on Mac (Terminal Double-Click)
+### [X] Auto-Launch on Mac (Terminal Double-Click)
 
 **Goal:** Make it easy to start SaltStocks without opening Terminal and typing commands — double-click a file to launch.
 
