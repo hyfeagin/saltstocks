@@ -305,8 +305,8 @@ Include: **TOTAL OWED TO HOLLY**
 **Files:** new route in `app/main.py`, new template `app/templates/dashboard.html`, update `app/templates/base.html` nav
 
 ---
-
-### [ ] Umivera COGS — Materials, Recipes & Batch Costing
+Cancelled Business is moving to wholesale model and Recipes and batch making will no longer be the used as a business model
+~~~### [ ] Umivera COGS — Materials, Recipes & Batch Costing
 
 **Goal:** Build the production cost tracking side of SaltStocks for Umivera bath salt products. Track what materials go into each product, calculate cost per unit, and record production batches.
 
@@ -324,7 +324,7 @@ Include: **TOTAL OWED TO HOLLY**
 - Material stock is decremented when a batch is recorded
 - Report shows COGS per batch and per unit
 
-**Files:** new tables in `app/migrate.py`, new routes + templates, separate from resale flows
+**Files:** new tables in `app/migrate.py`, new routes + templates, separate from resale flows~~~
 
 ---
 
