@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from ..constants import DEFAULT_CHANNEL, DEFAULT_STATUS
-from ..deps import templates, get_db
-from ..utils import clean_str, normalize_code, get_next_sku, fetch_resale_rows, fetch_resale_item_by_id
+from ..deps import render, get_db
+from ..utils import clean_str, safe_parse_float, normalize_code, get_next_sku, fetch_resale_rows, fetch_resale_item_by_id, upsert_resale_listing
 
 router = APIRouter()
 
@@ -22,10 +22,7 @@ router = APIRouter()
 @router.get("/resale", response_class=HTMLResponse)
 def resale_list(request: Request, q: Optional[str] = None, conn: sqlite3.Connection = Depends(get_db)):
     rows = fetch_resale_rows(conn, q=q)
-    return templates.TemplateResponse(
-        "resale_list.html",
-        {"request": request, "rows": rows, "q": q or ""},
-    )
+    return render("resale_list.html", request, rows=rows, q=q or "")
 # =========================
 # ANCHOR: RESALE_LIST_VIEW_END
 # =========================
@@ -129,13 +126,10 @@ def resale_bulk_update(
     location = location.strip()
     append_tags = append_tags.strip()
 
-    unit_cost_value: Optional[float] = None
-    unit_cost = unit_cost.strip()
-    if unit_cost:
-        try:
-            unit_cost_value = float(unit_cost)
-        except ValueError:
-            unit_cost_value = None
+    try:
+        unit_cost_value: Optional[float] = safe_parse_float(unit_cost)
+    except ValueError:
+        unit_cost_value = None
 
     with conn:
         if location:
@@ -165,32 +159,13 @@ def resale_bulk_update(
             )
 
         if status or channel:
+            kwargs = {}
+            if status:
+                kwargs["status"] = status
+            if channel:
+                kwargs["channel"] = channel
             for i in item_id:
-                existing = conn.execute(
-                    "SELECT id FROM resale_listings WHERE item_id=?", (i,)
-                ).fetchone()
-
-                if existing:
-                    if status and channel:
-                        conn.execute(
-                            "UPDATE resale_listings SET status=?, channel=?, updated_at=datetime('now') WHERE item_id=?",
-                            (status, channel, i),
-                        )
-                    elif status:
-                        conn.execute(
-                            "UPDATE resale_listings SET status=?, updated_at=datetime('now') WHERE item_id=?",
-                            (status, i),
-                        )
-                    elif channel:
-                        conn.execute(
-                            "UPDATE resale_listings SET channel=?, updated_at=datetime('now') WHERE item_id=?",
-                            (channel, i),
-                        )
-                else:
-                    conn.execute(
-                        "INSERT INTO resale_listings (item_id, channel, status) VALUES (?, ?, ?)",
-                        (i, channel or DEFAULT_CHANNEL, status or DEFAULT_STATUS),
-                    )
+                upsert_resale_listing(conn, i, **kwargs)
 
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
@@ -246,14 +221,6 @@ async def resale_import_csv(
             return None
         return cleaned
 
-    def parse_float(val: Optional[str]) -> Optional[float]:
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except ValueError:
-            raise ValueError("invalid number")
-
     errors: List[str] = []
     processed = 0
     created = 0
@@ -261,19 +228,11 @@ async def resale_import_csv(
     skipped = 0
 
     if not reader.fieldnames:
-        rows = _fetch_resale_rows(conn)
-        return templates.TemplateResponse(
-            "resale_list.html",
-            {
-                "request": request,
-                "rows": rows,
-                "q": "",
-                "import_summary": {
-                    "processed": 0, "created": 0, "updated": 0, "skipped": 0,
-                    "errors": ["No headers found in CSV."],
-                },
-            },
-        )
+        rows = fetch_resale_rows(conn)
+        return render("resale_list.html", request, rows=rows, q="", import_summary={
+            "processed": 0, "created": 0, "updated": 0, "skipped": 0,
+            "errors": ["No headers found in CSV."],
+        })
 
     with conn:
         for row_num, row in enumerate(reader, start=2):
@@ -317,11 +276,11 @@ async def resale_import_csv(
 
             try:
                 if "qty_on_hand" in header_set:
-                    qty_val = parse_float(qty_raw)
+                    qty_val = safe_parse_float(qty_raw)
                 if "unit_cost" in header_set:
-                    unit_cost_val = parse_float(unit_cost_raw)
+                    unit_cost_val = safe_parse_float(unit_cost_raw)
                 if "list_price" in header_set:
-                    list_price_val = parse_float(list_price_raw)
+                    list_price_val = safe_parse_float(list_price_raw)
             except ValueError:
                 row_errors.append("invalid numeric value")
 
@@ -341,8 +300,8 @@ async def resale_import_csv(
             try:
                 conn.execute("SAVEPOINT resale_import_row")
                 if is_create:
-                    company_val = normalize_code(get_value("company") or "GV")
-                    brand_code_val = normalize_code(get_value("brand_code") or "MISC")
+                    company_val = normalize_code(get_value("company"), "GV")
+                    brand_code_val = normalize_code(get_value("brand_code"), "MISC")
                     brand_val = get_value("brand")
                     category_val = get_value("category")
                     ip_val = get_value("ip")
@@ -387,10 +346,7 @@ async def resale_import_csv(
                     status_val = get_value("status") or DEFAULT_STATUS
                     channel_val = get_value("channel") or DEFAULT_CHANNEL
                     url_val = get_value("url")
-                    conn.execute(
-                        "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
-                        (new_id, channel_val, status_val, list_price_val, url_val),
-                    )
+                    upsert_resale_listing(conn, new_id, status=status_val, channel=channel_val, list_price=list_price_val, url=url_val)
                     created += 1
                 else:
                     item_sets = []
@@ -467,25 +423,13 @@ async def resale_import_csv(
                             new_status = status_val or listing_row["status"]
                             new_list_price = list_price_val if list_price_provided else listing_row["list_price"]
                             new_url = url_val if url_provided else listing_row["url"]
-                            conn.execute(
-                                """
-                                UPDATE resale_listings
-                                SET channel=?, status=?, list_price=?, url=?, updated_at=datetime('now')
-                                WHERE item_id=?
-                                """,
-                                (new_channel, new_status, new_list_price, new_url, item_id),
-                            )
                         else:
-                            conn.execute(
-                                "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
-                                (
-                                    item_id,
-                                    channel_val or DEFAULT_CHANNEL,
-                                    status_val or DEFAULT_STATUS,
-                                    list_price_val,
-                                    url_val,
-                                ),
-                            )
+                            new_channel = channel_val or DEFAULT_CHANNEL
+                            new_status = status_val or DEFAULT_STATUS
+                            new_list_price = list_price_val
+                            new_url = url_val
+
+                        upsert_resale_listing(conn, item_id, status=new_status, channel=new_channel, list_price=new_list_price, url=new_url)
                     updated += 1
 
                 conn.execute("RELEASE resale_import_row")
@@ -495,22 +439,14 @@ async def resale_import_csv(
                 skipped += 1
                 errors.append(f"Row {row_num}: {exc}")
 
-    rows = _fetch_resale_rows(conn)
-    return templates.TemplateResponse(
-        "resale_list.html",
-        {
-            "request": request,
-            "rows": rows,
-            "q": "",
-            "import_summary": {
-                "processed": processed,
-                "created": created,
-                "updated": updated,
-                "skipped": skipped,
-                "errors": errors,
-            },
-        },
-    )
+    rows = fetch_resale_rows(conn)
+    return render("resale_list.html", request, rows=rows, q="", import_summary={
+        "processed": processed,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "errors": errors,
+    })
 # =========================
 # ANCHOR: RESALE_IMPORT_CSV_END
 # =========================
@@ -528,10 +464,7 @@ def resale_new_form(request: Request, conn: sqlite3.Connection = Depends(get_db)
     categories = conn.execute(
         "SELECT name, is_active FROM categories WHERE is_active=1 ORDER BY name ASC"
     ).fetchall()
-    return templates.TemplateResponse(
-        "resale_form.html",
-        {"request": request, "mode": "new", "item": None, "codes": codes, "categories": categories},
-    )
+    return render("resale_form.html", request, mode="new", item=None, codes=codes, categories=categories)
 # =========================
 # ANCHOR: RESALE_NEW_FORM_END
 # =========================
@@ -565,8 +498,8 @@ def resale_create(
       SKU = {Company}-{BrandCode}-{Sequence}
     SKU is not editable (A+A rule).
     """
-    company_n = normalize_code(company) or "GV"
-    code = normalize_code(brand_code) or "MISC"
+    company_n = normalize_code(company, "GV")
+    code = normalize_code(brand_code, "MISC")
 
     with conn:
         sku_final = get_next_sku(conn, company_n, code)
@@ -599,10 +532,7 @@ def resale_create(
             ),
         )
         item_id = cur.lastrowid
-        conn.execute(
-            "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
-            (item_id, clean_str(channel, DEFAULT_CHANNEL), clean_str(status, DEFAULT_STATUS), list_price, clean_str(url)),
-        )
+        upsert_resale_listing(conn, item_id, channel=clean_str(channel, DEFAULT_CHANNEL), status=clean_str(status, DEFAULT_STATUS), list_price=list_price, url=clean_str(url))
 
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
@@ -632,10 +562,7 @@ def resale_edit_form(request: Request, item_id: int, conn: sqlite3.Connection = 
         categories = list(categories)
         categories.append({"name": item["category"], "is_active": 0})
 
-    return templates.TemplateResponse(
-        "resale_form.html",
-        {"request": request, "mode": "edit", "item": item, "codes": codes, "categories": categories},
-    )
+    return render("resale_form.html", request, mode="edit", item=item, codes=codes, categories=categories)
 # =========================
 # ANCHOR: RESALE_EDIT_FORM_END
 # =========================
@@ -670,8 +597,8 @@ def resale_update(
     SKU remains stable forever (NOT editable / NOT updated here).
     SKU format: {Company}-{BrandCode}-{Sequence} (generated on create only).
     """
-    company_n = normalize_code(company) or "GV"
-    code = normalize_code(brand_code) or "MISC"
+    company_n = normalize_code(company, "GV")
+    code = normalize_code(brand_code, "MISC")
 
     with conn:
         existing_item = conn.execute(
@@ -707,24 +634,7 @@ def resale_update(
         status_v = clean_str(status, DEFAULT_STATUS)
         url_v = clean_str(url)
 
-        existing_listing = conn.execute(
-            "SELECT id FROM resale_listings WHERE item_id=?", (item_id,)
-        ).fetchone()
-
-        if existing_listing:
-            conn.execute(
-                """
-                UPDATE resale_listings
-                SET channel=?, status=?, list_price=?, url=?, updated_at=datetime('now')
-                WHERE item_id=?
-                """,
-                (channel_v, status_v, list_price, url_v, item_id),
-            )
-        else:
-            conn.execute(
-                "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
-                (item_id, channel_v, status_v, list_price, url_v),
-            )
+        upsert_resale_listing(conn, item_id, channel=channel_v, status=status_v, list_price=list_price, url=url_v)
 
     return RedirectResponse(url="/resale", status_code=303)
 # =========================

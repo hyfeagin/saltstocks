@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..db import DB_PATH
-from ..deps import templates, BACKUP_DIR, get_db
+from ..deps import render, BACKUP_DIR, get_db
 
 router = APIRouter()
 
@@ -38,10 +38,7 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         WHERE item_type='resale' AND qty_on_hand <= 0
         """
     ).fetchone()["c"]
-    return templates.TemplateResponse(
-        "dashboard.html",
-        {"request": request, "resale_count": resale_count, "unlisted": unlisted, "low_qty": low_qty},
-    )
+    return render("dashboard.html", request, resale_count=resale_count, unlisted=unlisted, low_qty=low_qty)
 # =========================
 # ANCHOR: DASHBOARD_VIEW_END
 # =========================

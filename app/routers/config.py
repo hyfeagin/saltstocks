@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..constants import EBAY_ENVIRONMENTS, DEFAULT_ENVIRONMENT
-from ..deps import templates, get_db
+from ..deps import render, get_db
 from ..utils import clean_str, normalize_code, get_ebay_profile_bundle, missing_ebay_credentials
 
 router = APIRouter()
@@ -25,19 +25,15 @@ def config_home(request: Request, saved_ebay: int = 0, oauth: int = 0, conn: sql
         "SELECT * FROM categories ORDER BY name ASC"
     ).fetchall()
     ebay_bundle = get_ebay_profile_bundle(conn)
-    return templates.TemplateResponse(
-        "config.html",
-        {
-            "request": request,
-            "codes": codes,
-            "categories": categories,
-            "ebay_active_environment": ebay_bundle["active_environment"],
-            "ebay_profiles": ebay_bundle["profiles"],
-            "ebay_settings": ebay_bundle["active_profile"],
-            "ebay_missing": missing_ebay_credentials(ebay_bundle["active_profile"]),
-            "saved_ebay": saved_ebay == 1,
-            "oauth_success": oauth == 1,
-        },
+    return render("config.html", request,
+        codes=codes,
+        categories=categories,
+        ebay_active_environment=ebay_bundle["active_environment"],
+        ebay_profiles=ebay_bundle["profiles"],
+        ebay_settings=ebay_bundle["active_profile"],
+        ebay_missing=missing_ebay_credentials(ebay_bundle["active_profile"]),
+        saved_ebay=saved_ebay == 1,
+        oauth_success=oauth == 1,
     )
 
 

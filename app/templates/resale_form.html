@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import status_select, channel_select %}
 {% block content %}
 <h1>{{ "Add Resale Item" if mode=="new" else "Edit Resale Item" }}</h1>
 
@@ -90,22 +91,12 @@
 
       <div>
         <label>Status</label>
-        {% set s = item['status'] if item else RESALE_STATUSES[0] %}
-        <select name="status">
-          {% for opt in RESALE_STATUSES %}
-            <option value="{{ opt }}" {{ 'selected' if s==opt else '' }}>{{ opt }}</option>
-          {% endfor %}
-        </select>
+        {{ status_select(selected=item['status'] if item else RESALE_STATUSES[0]) }}
       </div>
 
       <div>
         <label>Channel</label>
-        {% set c = item['channel'] if item else RESALE_CHANNELS[0] %}
-        <select name="channel">
-          {% for opt in RESALE_CHANNELS %}
-            <option value="{{ opt }}" {{ 'selected' if c==opt else '' }}>{{ opt }}</option>
-          {% endfor %}
-        </select>
+        {{ channel_select(selected=item['channel'] if item else RESALE_CHANNELS[0]) }}
       </div>
 
       <div>

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..constants import DEFAULT_ENVIRONMENT
-from ..deps import templates, get_db
+from ..deps import render, get_db
 from ..utils import (
     get_ebay_profile_bundle,
     missing_ebay_credentials,
@@ -44,21 +44,17 @@ def _ebay_import_response(
     missing_credentials: Optional[List[str]] = None,
 ):
     """Shared template response builder for the eBay import page."""
-    return templates.TemplateResponse(
-        "ebay_import.html",
-        {
-            "request": request,
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
-            "status_filter": status_filter,
-            "dry_run": dry_run,
-            "preview_rows": preview_rows,
-            "summary": summary,
-            "error_message": error_message,
-            "success_message": success_message,
-            "status_note": status_note,
-            "missing_credentials": missing_credentials or [],
-        },
+    return render("ebay_import.html", request,
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat(),
+        status_filter=status_filter,
+        dry_run=dry_run,
+        preview_rows=preview_rows,
+        summary=summary,
+        error_message=error_message,
+        success_message=success_message,
+        status_note=status_note,
+        missing_credentials=missing_credentials or [],
     )
 
 
@@ -79,17 +75,13 @@ def ebay_oauth_start(request: Request, conn: sqlite3.Connection = Depends(get_db
 
     if missing_for_start or not ru_name:
         missing_fields = missing_for_start + (["ru_name"] if not ru_name else [])
-        return templates.TemplateResponse(
-            "ebay_oauth_error.html",
-            {
-                "request": request,
-                "error_message": (
-                    "Cannot start OAuth flow — missing required fields: "
-                    + ", ".join(missing_fields)
-                    + ". Save Client ID, Client Secret, and RuName in Settings first."
-                ),
-                "environment": env,
-            },
+        return render("ebay_oauth_error.html", request,
+            error_message=(
+                "Cannot start OAuth flow — missing required fields: "
+                + ", ".join(missing_fields)
+                + ". Save Client ID, Client Secret, and RuName in Settings first."
+            ),
+            environment=env,
         )
 
     settings = EbaySettings(
@@ -101,15 +93,9 @@ def ebay_oauth_start(request: Request, conn: sqlite3.Connection = Depends(get_db
     try:
         auth_url = build_auth_url(settings, ru_name)
     except EbayIntegrationError as exc:
-        return templates.TemplateResponse(
-            "ebay_oauth_error.html",
-            {"request": request, "error_message": str(exc), "environment": env},
-        )
+        return render("ebay_oauth_error.html", request, error_message=str(exc), environment=env)
 
-    return templates.TemplateResponse(
-        "ebay_oauth_start.html",
-        {"request": request, "auth_url": auth_url, "environment": env},
-    )
+    return render("ebay_oauth_start.html", request, auth_url=auth_url, environment=env)
 
 
 @router.post("/ebay/oauth/exchange", response_class=HTMLResponse)
@@ -121,10 +107,7 @@ def ebay_oauth_exchange(
     """Parse the code from the pasted redirect URL and exchange it for tokens."""
     redirect_url = (redirect_url or "").strip()
     if not redirect_url:
-        return templates.TemplateResponse(
-            "ebay_oauth_error.html",
-            {"request": request, "error_message": "No URL pasted.", "environment": ""},
-        )
+        return render("ebay_oauth_error.html", request, error_message="No URL pasted.", environment="")
 
     # Accept either a full URL or just the raw code.
     # eBay codes contain '#' chars (encoded as %23 in the URL). Browsers often
@@ -151,15 +134,9 @@ def ebay_oauth_exchange(
         code = _up.unquote(redirect_url)
 
     if error:
-        return templates.TemplateResponse(
-            "ebay_oauth_error.html",
-            {"request": request, "error_message": f"eBay returned an error: {error}", "environment": ""},
-        )
+        return render("ebay_oauth_error.html", request, error_message=f"eBay returned an error: {error}", environment="")
     if not code:
-        return templates.TemplateResponse(
-            "ebay_oauth_error.html",
-            {"request": request, "error_message": "Could not find a code in the pasted URL.", "environment": ""},
-        )
+        return render("ebay_oauth_error.html", request, error_message="Could not find a code in the pasted URL.", environment="")
 
     ebay_bundle = get_ebay_profile_bundle(conn)
     profile = ebay_bundle["active_profile"]
@@ -175,10 +152,7 @@ def ebay_oauth_exchange(
     try:
         _, refresh_token = exchange_code_for_tokens(settings, ru_name, code)
     except EbayIntegrationError as exc:
-        return templates.TemplateResponse(
-            "ebay_oauth_error.html",
-            {"request": request, "error_message": str(exc), "environment": env},
-        )
+        return render("ebay_oauth_error.html", request, error_message=str(exc), environment=env)
 
     with conn:
         conn.execute(

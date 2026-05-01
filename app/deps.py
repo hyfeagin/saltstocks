@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 
+from fastapi import Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from .db import get_conn
@@ -19,6 +21,11 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.globals["RESALE_STATUSES"] = RESALE_STATUSES
 templates.env.globals["RESALE_CHANNELS"] = RESALE_CHANNELS
 templates.env.globals["EBAY_ENVIRONMENTS"] = EBAY_ENVIRONMENTS
+
+
+def render(template_name: str, request: Request, **context: Any) -> HTMLResponse:
+    """Shorthand for templates.TemplateResponse — injects request automatically."""
+    return templates.TemplateResponse(template_name, {"request": request, **context})
 
 
 def get_db() -> Generator[sqlite3.Connection, None, None]:

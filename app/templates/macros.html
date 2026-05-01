@@ -1,0 +1,33 @@
+{% macro status_select(name="status", selected="") %}
+<select name="{{ name }}">
+  {% for opt in RESALE_STATUSES %}
+    <option value="{{ opt }}" {{ 'selected' if selected==opt else '' }}>{{ opt }}</option>
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% macro channel_select(name="channel", selected="") %}
+<select name="{{ name }}">
+  {% for opt in RESALE_CHANNELS %}
+    <option value="{{ opt }}" {{ 'selected' if selected==opt else '' }}>{{ opt }}</option>
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% macro status_select_with_blank(name="status", selected="") %}
+<select name="{{ name }}">
+  <option value="">(no change)</option>
+  {% for opt in RESALE_STATUSES %}
+    <option value="{{ opt }}" {{ 'selected' if selected==opt else '' }}>{{ opt }}</option>
+  {% endfor %}
+</select>
+{% endmacro %}
+
+{% macro channel_select_with_blank(name="channel", selected="") %}
+<select name="{{ name }}">
+  <option value="">(no change)</option>
+  {% for opt in RESALE_CHANNELS %}
+    <option value="{{ opt }}" {{ 'selected' if selected==opt else '' }}>{{ opt }}</option>
+  {% endfor %}
+</select>
+{% endmacro %}

@@ -306,7 +306,7 @@ Include: **TOTAL OWED TO HOLLY**
 
 ---
 
-### [ ] Umivera COGS — Materials, Recipes & Batch Costing
+### [~] Umivera COGS — Materials, Recipes & Batch Costing — CANCELLED
 
 **Goal:** Build the production cost tracking side of SaltStocks for Umivera bath salt products. Track what materials go into each product, calculate cost per unit, and record production batches.
 
@@ -680,7 +680,7 @@ def fetch_resale_item_by_id(conn, item_id: int):
 
 ---
 
-### [ ] `upsert_resale_listing()` Helper
+### [x] `upsert_resale_listing()` Helper
 
 **Priority:** Medium — eliminates ~60 lines of duplicate insert/update logic
 
@@ -700,7 +700,7 @@ def upsert_resale_listing(conn, item_id, channel, status, list_price, url):
 
 ---
 
-### [ ] Jinja2 Macros for Status/Channel Dropdowns
+### [x] Jinja2 Macros for Status/Channel Dropdowns
 
 **Priority:** Medium — template DRY
 
@@ -712,7 +712,7 @@ def upsert_resale_listing(conn, item_id, channel, status, list_price, url):
 
 ---
 
-### [ ] Standardize Float Parsing in CSV Import
+### [x] Standardize Float Parsing in CSV Import
 
 **Priority:** Medium — correctness + consistency
 
@@ -722,7 +722,7 @@ def upsert_resale_listing(conn, item_id, channel, status, list_price, url):
 
 ---
 
-### [ ] `normalize_code()` Default Parameter
+### [x] `normalize_code()` Default Parameter
 
 **Priority:** Low — minor cleanup
 
@@ -742,7 +742,7 @@ company_n = normalize_code(company, "GV")
 
 ---
 
-### [ ] `render()` Template Response Shorthand
+### [x] `render()` Template Response Shorthand
 
 **Priority:** Low — minor boilerplate reduction
 

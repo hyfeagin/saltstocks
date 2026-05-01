@@ -3,7 +3,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from .constants import EBAY_ENVIRONMENTS, DEFAULT_ENVIRONMENT
+from .constants import DEFAULT_CHANNEL, DEFAULT_STATUS, EBAY_ENVIRONMENTS, DEFAULT_ENVIRONMENT
+
+# Sentinel — distinguishes "caller didn't pass this field" from None (valid NULL value).
+_UNSET = object()
 
 
 def clean_str(val: str, default: Optional[str] = None) -> Optional[str]:
@@ -12,10 +15,25 @@ def clean_str(val: str, default: Optional[str] = None) -> Optional[str]:
     return default if not cleaned else cleaned
 
 
-def normalize_code(s: str) -> str:
+def safe_parse_float(val: Optional[str], default: Optional[float] = None) -> Optional[float]:
+    """Parse a string as float.
+
+    - Blank or None → returns default.
+    - Valid number string → returns float.
+    - Non-empty but unparseable → raises ValueError.
+    """
+    if val is None or (stripped := val.strip()) == "":
+        return default
+    try:
+        return float(stripped)
+    except ValueError:
+        raise ValueError(f"invalid number: {val!r}")
+
+
+def normalize_code(s: str, default: str = "") -> str:
     s = (s or "").strip().upper()
     s = s.replace(" ", "").replace("-", "").replace("_", "")
-    return s
+    return s if s else default
 
 
 def get_next_sku(conn: sqlite3.Connection, company: str, code: str) -> str:
@@ -101,6 +119,59 @@ def get_ebay_profile_bundle(conn: sqlite3.Connection) -> Dict[str, Any]:
         "profiles": profiles,
         "active_profile": profiles[active_environment],
     }
+
+
+def upsert_resale_listing(
+    conn: sqlite3.Connection,
+    item_id: int,
+    *,
+    status: Any = _UNSET,
+    channel: Any = _UNSET,
+    list_price: Any = _UNSET,
+    url: Any = _UNSET,
+) -> None:
+    """Insert or update the resale_listings row for item_id.
+
+    Fields left at _UNSET are skipped on UPDATE (existing value is preserved)
+    and replaced with column defaults on INSERT.
+    """
+    existing = conn.execute(
+        "SELECT id FROM resale_listings WHERE item_id=?", (item_id,)
+    ).fetchone()
+
+    if existing:
+        set_parts: List[str] = []
+        params: List[Any] = []
+        if status is not _UNSET:
+            set_parts.append("status=?")
+            params.append(status)
+        if channel is not _UNSET:
+            set_parts.append("channel=?")
+            params.append(channel)
+        if list_price is not _UNSET:
+            set_parts.append("list_price=?")
+            params.append(list_price)
+        if url is not _UNSET:
+            set_parts.append("url=?")
+            params.append(url)
+        if set_parts:
+            set_parts.append("updated_at=datetime('now')")
+            params.append(item_id)
+            conn.execute(
+                f"UPDATE resale_listings SET {', '.join(set_parts)} WHERE item_id=?",
+                params,
+            )
+    else:
+        conn.execute(
+            "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
+            (
+                item_id,
+                channel if channel is not _UNSET else DEFAULT_CHANNEL,
+                status if status is not _UNSET else DEFAULT_STATUS,
+                list_price if list_price is not _UNSET else None,
+                url if url is not _UNSET else None,
+            ),
+        )
 
 
 def fetch_resale_rows(conn: sqlite3.Connection, q: Optional[str] = None) -> list:
