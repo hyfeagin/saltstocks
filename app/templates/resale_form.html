@@ -1,29 +1,45 @@
 {% extends "base.html" %}
 {% from "macros.html" import status_select, channel_select %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+{% endblock %}
+
 {% block content %}
-<h1>{{ "Add Resale Item" if mode=="new" else "Edit Resale Item" }}</h1>
-
-<div class="card">
-  {% if mode == "edit" and item %}
-    <div class="muted" style="margin-bottom:10px;">
-      <b>SKU (read-only):</b> <code>{{ item["sku"] }}</code>
+<div class="rs-page rs-form-page">
+  <header class="rs-page-header">
+    <div>
+      <h1>{{ "Add Resale Item" if mode=="new" else "Edit Resale Item" }}</h1>
+      <p class="rs-subtitle">Create or update a resale item without breaking the existing inventory workflow.</p>
     </div>
-  {% endif %}
+    <div class="rs-actions">
+      <a class="rs-btn rs-btn-ghost" href="/resale">Back to Inventory</a>
+    </div>
+  </header>
 
-  <form method="post" action="{{ '/resale/new' if mode=='new' else '/resale/' ~ item['id'] ~ '/edit' }}">
-    <div class="row">
-      <div>
-        <label>Company</label>
-        {% set co = (item["company"] if item and item["company"] else "GV") %}
-        <select name="company">
-          <option value="GV" {{ 'selected' if co=='GV' else '' }}>GV (Geekery Vault)</option>
-          <option value="UM" {{ 'selected' if co=='UM' else '' }}>UM (Umivera / Lavender Lore)</option>
-        </select>
-        <div class="muted">Used in SKU prefix. Resale defaults to GV.</div>
+  <section class="rs-form-shell">
+    {% if mode == "edit" and item %}
+      <div class="rs-form-banner">
+        <span class="rs-form-banner-label">SKU</span>
+        <code>{{ item["sku"] }}</code>
+        <span class="rs-form-banner-note">Read-only after creation.</span>
       </div>
+    {% endif %}
 
-      <div>
-        <label>Category</label>
+    <form method="post" action="{{ '/resale/new' if mode=='new' else '/resale/' ~ item['id'] ~ '/edit' }}">
+      <div class="rs-form-grid">
+        <div class="rs-field">
+          <label>Company</label>
+        {% set co = (item["company"] if item and item["company"] else "GV") %}
+          <select name="company">
+            <option value="GV" {{ 'selected' if co=='GV' else '' }}>GV (Geekery Vault)</option>
+            <option value="UM" {{ 'selected' if co=='UM' else '' }}>UM (Umivera / Lavender Lore)</option>
+          </select>
+          <div class="rs-help-text">Used in SKU prefix. Resale defaults to GV.</div>
+        </div>
+
+        <div class="rs-field">
+          <label>Category</label>
         {% if item and item["category"] %}
           {% set cat = item["category"] %}
         {% elif categories and categories|length > 0 %}
@@ -31,100 +47,101 @@
         {% else %}
           {% set cat = "Collectibles" %}
         {% endif %}
-        <select name="category">
-          {% for opt in categories %}
-            <option value="{{ opt['name'] }}" {{ 'selected' if cat==opt['name'] else '' }}>
-              {{ opt['name'] }}{{ ' (inactive)' if opt['is_active']==0 else '' }}
-            </option>
-          {% endfor %}
-        </select>
-      </div>
+          <select name="category">
+            {% for opt in categories %}
+              <option value="{{ opt['name'] }}" {{ 'selected' if cat==opt['name'] else '' }}>
+                {{ opt['name'] }}{{ ' (inactive)' if opt['is_active']==0 else '' }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
 
-      <div>
-        <label>Brand Code / Item Code</label>
+        <div class="rs-field">
+          <label>Brand Code / Item Code</label>
         {% set bc = (item["brand_code"] if item and item["brand_code"] else "MISC") %}
-        <select name="brand_code" required>
-          <option value="" disabled {{ 'selected' if bc=='' else '' }}>(select a code)</option>
-          {% for x in codes %}
-            <option value="{{ x['code'] }}" {{ 'selected' if bc==x['code'] else '' }}>
-              {{ x['label'] }} ({{ x['code'] }})
-            </option>
-          {% endfor %}
-        </select>
-        <div class="muted">This drives the middle of the SKU.</div>
+          <select name="brand_code" required>
+            <option value="" disabled {{ 'selected' if bc=='' else '' }}>(select a code)</option>
+            {% for x in codes %}
+              <option value="{{ x['code'] }}" {{ 'selected' if bc==x['code'] else '' }}>
+                {{ x['label'] }} ({{ x['code'] }})
+              </option>
+            {% endfor %}
+          </select>
+          <div class="rs-help-text">This drives the middle of the SKU.</div>
+        </div>
+
+        <div class="rs-field">
+          <label>IP / Franchise (optional)</label>
+          <input name="ip" value="{{ item['ip'] if item and item['ip'] else '' }}" placeholder="Marvel, Spawn, Star Wars..." />
+        </div>
+
+        <div class="rs-field rs-field-span-2">
+          <label>Name</label>
+          <input name="name" value="{{ item['name'] if item else '' }}" required placeholder="e.g., Funko Pop Aquaman #123" />
+        </div>
+
+        <div class="rs-field">
+          <label>Qty on hand (multiples supported)</label>
+          <input type="number" step="1" name="qty_on_hand" value="{{ item['qty_on_hand'] if item else 1 }}" />
+        </div>
+
+        <div class="rs-field">
+          <label>Unit cost ($ per each)</label>
+          <input type="number" step="0.01" name="unit_cost" value="{{ item['unit_cost'] if item else 0 }}" />
+        </div>
+
+        <div class="rs-field">
+          <label>Location</label>
+          <input name="location" value="{{ item['location'] if item else '' }}" placeholder="Tote A3, Shelf 2..." />
+        </div>
+
+        <div class="rs-field">
+          <label>Condition</label>
+          <input name="condition" value="{{ item['condition'] if item else '' }}" placeholder="New, Open box, Used..." />
+        </div>
+
+        <div class="rs-field rs-field-span-2">
+          <label>Tags</label>
+          <input name="tags" value="{{ item['tags'] if item else '' }}" placeholder="funko, dc, hero" />
+        </div>
+
+        <div class="rs-field">
+          <label>Status</label>
+          {{ status_select(selected=item['status'] if item else RESALE_STATUSES[0]) }}
+        </div>
+
+        <div class="rs-field">
+          <label>Channel</label>
+          {{ channel_select(selected=item['channel'] if item else RESALE_CHANNELS[0]) }}
+        </div>
+
+        <div class="rs-field">
+          <label>List price (optional)</label>
+          <input type="number" step="0.01" name="list_price" value="{{ item['list_price'] if item and item['list_price'] else '' }}" />
+        </div>
+
+        <div class="rs-field rs-field-span-3">
+          <label>URL (optional)</label>
+          <input name="url" value="{{ item['url'] if item else '' }}" placeholder="Listing link" />
+        </div>
+
+        <div class="rs-field rs-field-span-3">
+          <label>Notes</label>
+          <textarea name="notes" rows="5">{{ item['notes'] if item else '' }}</textarea>
+        </div>
+
+        {% if mode == "new" %}
+        <div class="rs-form-note rs-field-span-3">
+          SKU will be auto-generated when you save. It remains read-only after creation.
+        </div>
+        {% endif %}
       </div>
 
-      <div>
-        <label>IP / Franchise (optional)</label>
-        <input name="ip" value="{{ item['ip'] if item and item['ip'] else '' }}" placeholder="Marvel, Spawn, Star Wars..." />
+      <div class="rs-form-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Save</button>
+        <a class="rs-btn rs-btn-ghost" href="/resale">Cancel</a>
       </div>
-
-      <div>
-        <label>Name</label>
-        <input name="name" value="{{ item['name'] if item else '' }}" required placeholder="e.g., Funko Pop Aquaman #123" />
-      </div>
-
-      <div>
-        <label>Qty on hand (multiples supported)</label>
-        <input type="number" step="1" name="qty_on_hand" value="{{ item['qty_on_hand'] if item else 1 }}" />
-      </div>
-
-      <div>
-        <label>Unit cost ($ per each)</label>
-        <input type="number" step="0.01" name="unit_cost" value="{{ item['unit_cost'] if item else 0 }}" />
-      </div>
-
-      <div>
-        <label>Location</label>
-        <input name="location" value="{{ item['location'] if item else '' }}" placeholder="Tote A3, Shelf 2..." />
-      </div>
-
-      <div>
-        <label>Condition</label>
-        <input name="condition" value="{{ item['condition'] if item else '' }}" placeholder="New, Open box, Used..." />
-      </div>
-
-      <div>
-        <label>Tags</label>
-        <input name="tags" value="{{ item['tags'] if item else '' }}" placeholder="funko, dc, hero" />
-      </div>
-
-      <div>
-        <label>Status</label>
-        {{ status_select(selected=item['status'] if item else RESALE_STATUSES[0]) }}
-      </div>
-
-      <div>
-        <label>Channel</label>
-        {{ channel_select(selected=item['channel'] if item else RESALE_CHANNELS[0]) }}
-      </div>
-
-      <div>
-        <label>List price (optional)</label>
-        <input type="number" step="0.01" name="list_price" value="{{ item['list_price'] if item and item['list_price'] else '' }}" />
-      </div>
-
-      <div style="grid-column: 1 / -1;">
-        <label>URL (optional)</label>
-        <input name="url" value="{{ item['url'] if item else '' }}" placeholder="Listing link" />
-      </div>
-
-      <div style="grid-column: 1 / -1;">
-        <label>Notes</label>
-        <textarea name="notes" rows="4">{{ item['notes'] if item else '' }}</textarea>
-      </div>
-
-      {% if mode == "new" %}
-      <div style="grid-column: 1 / -1;" class="muted">
-        SKU will be auto-generated when you save (read-only).
-      </div>
-      {% endif %}
-    </div>
-
-    <div style="margin-top:12px; display:flex; gap:10px;">
-      <button class="btn btn-primary" type="submit">Save</button>
-      <a class="btn" href="/resale" style="text-decoration:none; display:inline-block;">Cancel</a>
-    </div>
-  </form>
+    </form>
+  </section>
 </div>
 {% endblock %}

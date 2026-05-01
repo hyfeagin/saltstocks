@@ -14,12 +14,14 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 - Added contextual inline bulk edit controls that appear only when one or more resale items are selected.
 - Added `POST /resale/{id}/status` for kanban drag-and-drop status changes with JSON success/error responses.
 - Kept search, export, CSV import, qty adjust, and edit flows on the existing resale endpoints.
+- Restyled the resale create/edit form to match the new inventory theme using the shared resale stylesheet.
 
 ### Validation
 
 - `python -m py_compile` passed for the updated FastAPI modules.
 - Jinja template compilation passed for `base.html` and `resale_list.html`.
 - Live app smoke test covered startup plus requests to `/resale` and `/static/css/resale.css`.
+- Follow-up live smoke test confirmed `/resale/new` renders successfully with the themed form.
 
 ---
 

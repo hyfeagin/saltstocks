@@ -463,3 +463,117 @@ body {
     flex: 1;
   }
 }
+
+.rs-form-page {
+  max-width: 1120px;
+}
+
+.rs-form-shell {
+  padding: 22px;
+  background: var(--rs-surface);
+  border: 1px solid var(--rs-border);
+  border-radius: var(--rs-radius);
+  box-shadow: var(--rs-shadow);
+}
+
+.rs-form-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--rs-border);
+  border-radius: 14px;
+  background: var(--rs-surface-alt);
+}
+
+.rs-form-banner-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rs-muted);
+}
+
+.rs-form-banner code {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--rs-surface-deep);
+  color: var(--rs-accent-strong);
+  font-size: 0.9rem;
+}
+
+.rs-form-banner-note {
+  color: var(--rs-muted);
+  font-size: 0.92rem;
+}
+
+.rs-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.rs-form-grid textarea,
+.rs-form-grid input,
+.rs-form-grid select {
+  font: inherit;
+}
+
+.rs-form-grid textarea {
+  width: 100%;
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--rs-border);
+  border-radius: 12px;
+  background: #fcfffd;
+  color: var(--rs-text);
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.rs-form-grid textarea:focus {
+  outline: 2px solid rgba(47, 143, 115, 0.18);
+  border-color: var(--rs-accent);
+}
+
+.rs-field-span-2 {
+  grid-column: span 2;
+}
+
+.rs-field-span-3 {
+  grid-column: 1 / -1;
+}
+
+.rs-form-note {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(47, 143, 115, 0.08);
+  color: var(--rs-muted);
+}
+
+.rs-form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+@media (max-width: 960px) {
+  .rs-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rs-field-span-2,
+  .rs-field-span-3 {
+    grid-column: auto;
+  }
+
+  .rs-form-actions {
+    flex-direction: column;
+  }
+
+  .rs-form-actions .rs-btn {
+    width: 100%;
+  }
+}
