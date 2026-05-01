@@ -660,7 +660,7 @@ ITEM_TYPE_RESALE = "resale"
 
 ---
 
-### [ ] Extract Resale JOIN Query Helper
+### [x] Extract Resale JOIN Query Helper
 
 **Priority:** High — eliminates copy-paste SQL
 

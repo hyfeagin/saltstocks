@@ -3,33 +3,16 @@ from __future__ import annotations
 import csv
 import io
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
 from ..constants import DEFAULT_CHANNEL, DEFAULT_STATUS
 from ..deps import templates, get_db
-from ..utils import clean_str, normalize_code, get_next_sku
+from ..utils import clean_str, normalize_code, get_next_sku, fetch_resale_rows, fetch_resale_item_by_id
 
 router = APIRouter()
-
-
-def _fetch_resale_rows(conn: sqlite3.Connection) -> list:
-    return conn.execute(
-        """
-        SELECT
-          i.*,
-          COALESCE(rl.status, 'unlisted') AS status,
-          COALESCE(rl.channel, 'unassigned') AS channel,
-          rl.list_price,
-          rl.url
-        FROM items i
-        LEFT JOIN resale_listings rl ON rl.item_id = i.id
-        WHERE i.item_type='resale'
-        ORDER BY i.updated_at DESC
-        """
-    ).fetchall()
 
 
 # =========================
@@ -38,27 +21,7 @@ def _fetch_resale_rows(conn: sqlite3.Connection) -> list:
 # =========================
 @router.get("/resale", response_class=HTMLResponse)
 def resale_list(request: Request, q: Optional[str] = None, conn: sqlite3.Connection = Depends(get_db)):
-    params: Dict[str, Any] = {}
-    where = "WHERE i.item_type='resale'"
-    if q:
-        where += " AND (i.name LIKE :q OR i.sku LIKE :q OR i.tags LIKE :q)"
-        params["q"] = f"%{q}%"
-
-    rows = conn.execute(
-        f"""
-        SELECT
-          i.*,
-          COALESCE(rl.status, 'unlisted') AS status,
-          COALESCE(rl.channel, 'unassigned') AS channel,
-          rl.list_price,
-          rl.url
-        FROM items i
-        LEFT JOIN resale_listings rl ON rl.item_id = i.id
-        {where}
-        ORDER BY i.updated_at DESC
-        """,
-        params,
-    ).fetchall()
+    rows = fetch_resale_rows(conn, q=q)
     return templates.TemplateResponse(
         "resale_list.html",
         {"request": request, "rows": rows, "q": q or ""},
@@ -653,20 +616,7 @@ def resale_create(
 # =========================
 @router.get("/resale/{item_id}/edit", response_class=HTMLResponse)
 def resale_edit_form(request: Request, item_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    item = conn.execute(
-        """
-        SELECT
-          i.*,
-          COALESCE(rl.status, 'unlisted') AS status,
-          COALESCE(rl.channel, 'unassigned') AS channel,
-          rl.list_price,
-          rl.url
-        FROM items i
-        LEFT JOIN resale_listings rl ON rl.item_id = i.id
-        WHERE i.id = ? AND i.item_type='resale'
-        """,
-        (item_id,),
-    ).fetchone()
+    item = fetch_resale_item_by_id(conn, item_id)
     codes = conn.execute(
         "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
     ).fetchall()

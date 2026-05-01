@@ -103,6 +103,48 @@ def get_ebay_profile_bundle(conn: sqlite3.Connection) -> Dict[str, Any]:
     }
 
 
+def fetch_resale_rows(conn: sqlite3.Connection, q: Optional[str] = None) -> list:
+    """Return all resale items joined with listing data, optionally filtered by search term."""
+    params: Dict[str, Any] = {}
+    where = "WHERE i.item_type='resale'"
+    if q:
+        where += " AND (i.name LIKE :q OR i.sku LIKE :q OR i.tags LIKE :q)"
+        params["q"] = f"%{q}%"
+    return conn.execute(
+        f"""
+        SELECT
+          i.*,
+          COALESCE(rl.status, 'unlisted') AS status,
+          COALESCE(rl.channel, 'unassigned') AS channel,
+          rl.list_price,
+          rl.url
+        FROM items i
+        LEFT JOIN resale_listings rl ON rl.item_id = i.id
+        {where}
+        ORDER BY i.updated_at DESC
+        """,
+        params,
+    ).fetchall()
+
+
+def fetch_resale_item_by_id(conn: sqlite3.Connection, item_id: int) -> Any:
+    """Return a single resale item joined with listing data, or None if not found."""
+    return conn.execute(
+        """
+        SELECT
+          i.*,
+          COALESCE(rl.status, 'unlisted') AS status,
+          COALESCE(rl.channel, 'unassigned') AS channel,
+          rl.list_price,
+          rl.url
+        FROM items i
+        LEFT JOIN resale_listings rl ON rl.item_id = i.id
+        WHERE i.id = ? AND i.item_type='resale'
+        """,
+        (item_id,),
+    ).fetchone()
+
+
 def missing_ebay_credentials(settings: Dict[str, Optional[str]]) -> List[str]:
     return [
         key for key in ["client_id", "client_secret", "refresh_token"]
