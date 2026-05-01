@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import sqlite3
+import urllib.parse as _up
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ..db import get_conn
-from ..deps import templates
+from ..constants import DEFAULT_ENVIRONMENT
+from ..deps import templates, get_db
 from ..utils import (
     get_ebay_profile_bundle,
     missing_ebay_credentials,
@@ -66,13 +67,11 @@ def _ebay_import_response(
 # (OAuth2 authorization code flow — get/refresh the user refresh token)
 # =========================
 @router.get("/ebay/oauth/start", response_class=HTMLResponse)
-def ebay_oauth_start(request: Request):
+def ebay_oauth_start(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     """Show the eBay auth URL and a form to paste the redirect URL back."""
-    conn = get_conn()
     ebay_bundle = get_ebay_profile_bundle(conn)
     profile = ebay_bundle["active_profile"]
     env = ebay_bundle["active_environment"]
-    conn.close()
 
     ru_name = (profile.get("ru_name") or "").strip()
     missing = missing_ebay_credentials(profile)
@@ -114,10 +113,12 @@ def ebay_oauth_start(request: Request):
 
 
 @router.post("/ebay/oauth/exchange", response_class=HTMLResponse)
-def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
+def ebay_oauth_exchange(
+    request: Request,
+    redirect_url: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
+):
     """Parse the code from the pasted redirect URL and exchange it for tokens."""
-    import urllib.parse as _up
-
     redirect_url = (redirect_url or "").strip()
     if not redirect_url:
         return templates.TemplateResponse(
@@ -133,7 +134,6 @@ def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
     code = ""
     error = ""
     if redirect_url.startswith("http"):
-        # Check for error param first (safe to use urlparse here, errors are simple)
         try:
             parsed = _up.urlparse(redirect_url)
             qs = _up.parse_qs(parsed.query)
@@ -141,17 +141,14 @@ def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
         except Exception:
             pass
 
-        # Extract code robustly: find 'code=' and take everything up to next '&'
-        raw = redirect_url
-        code_marker = "code="
-        idx = raw.find(code_marker)
+        idx = redirect_url.find("code=")
         if idx != -1:
-            start = idx + len(code_marker)
-            end = raw.find("&", start)
-            raw_code = raw[start:] if end == -1 else raw[start:end]
+            start = idx + len("code=")
+            end = redirect_url.find("&", start)
+            raw_code = redirect_url[start:] if end == -1 else redirect_url[start:end]
             code = _up.unquote(raw_code)
     else:
-        code = _up.unquote(redirect_url)  # user pasted just the code
+        code = _up.unquote(redirect_url)
 
     if error:
         return templates.TemplateResponse(
@@ -164,7 +161,6 @@ def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
             {"request": request, "error_message": "Could not find a code in the pasted URL.", "environment": ""},
         )
 
-    conn = get_conn()
     ebay_bundle = get_ebay_profile_bundle(conn)
     profile = ebay_bundle["active_profile"]
     env = ebay_bundle["active_environment"]
@@ -179,7 +175,6 @@ def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
     try:
         _, refresh_token = exchange_code_for_tokens(settings, ru_name, code)
     except EbayIntegrationError as exc:
-        conn.close()
         return templates.TemplateResponse(
             "ebay_oauth_error.html",
             {"request": request, "error_message": str(exc), "environment": env},
@@ -196,10 +191,8 @@ def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
             """,
             (env, profile["client_id"] or "", profile["client_secret"] or "", refresh_token, ru_name),
         )
-    conn.close()
 
-    from fastapi.responses import RedirectResponse as _Redirect
-    return _Redirect("/config?saved_ebay=1&oauth=1#ebay-settings", status_code=303)
+    return RedirectResponse("/config?saved_ebay=1&oauth=1#ebay-settings", status_code=303)
 # =========================
 # ANCHOR: EBAY_OAUTH_END
 # =========================
@@ -210,16 +203,14 @@ def ebay_oauth_exchange(request: Request, redirect_url: str = Form("")):
 # (Preview/apply inventory deductions from eBay orders)
 # =========================
 @router.get("/ebay/import", response_class=HTMLResponse)
-def ebay_import_page(request: Request):
+def ebay_import_page(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     end_date_value = date.today()
     start_date_value = end_date_value - timedelta(days=7)
-    conn = get_conn()
     ebay_bundle = get_ebay_profile_bundle(conn)
     settings = {
         **ebay_bundle["active_profile"],
         "environment": ebay_bundle["active_environment"],
     }
-    conn.close()
     return _ebay_import_response(
         request,
         start_date=start_date_value,
@@ -243,6 +234,7 @@ def ebay_import_run(
     status_filter: str = Form("PAID"),
     dry_run: str = Form("0"),
     action: str = Form("preview"),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
     today = date.today()
     default_start = today - timedelta(days=7)
@@ -272,7 +264,6 @@ def ebay_import_run(
             status_note, [], None, "End date must be on or after start date.", None,
         )
 
-    conn = get_conn()
     ebay_bundle = get_ebay_profile_bundle(conn)
     settings_dict = {
         **ebay_bundle["active_profile"],
@@ -280,7 +271,6 @@ def ebay_import_run(
     }
     missing = missing_ebay_credentials(settings_dict)
     if missing:
-        conn.close()
         return _ebay_import_response(
             request, start_date_value, end_date_value, status_filter_value, dry_run_enabled,
             status_note, [], None,
@@ -291,7 +281,7 @@ def ebay_import_run(
     settings = EbaySettings(
         client_id=settings_dict["client_id"] or "",
         client_secret=settings_dict["client_secret"] or "",
-        environment=settings_dict["environment"] or "SANDBOX",
+        environment=settings_dict["environment"] or DEFAULT_ENVIRONMENT,
         refresh_token=settings_dict["refresh_token"] or "",
     )
 
@@ -303,7 +293,6 @@ def ebay_import_run(
         access_token = refresh_access_token(settings)
         orders = fetch_orders(settings, access_token, start_iso, end_iso, status_filter="ANY")
     except EbayIntegrationError as exc:
-        conn.close()
         return _ebay_import_response(
             request, start_date_value, end_date_value, status_filter_value, dry_run_enabled,
             status_note, [], None, str(exc), None,
@@ -431,14 +420,11 @@ def ebay_import_run(
                 f"{applied_logs} import-log rows inserted."
             )
         except sqlite3.Error as exc:
-            conn.close()
             return _ebay_import_response(
                 request, start_date_value, end_date_value, status_filter_value, dry_run_enabled,
                 status_note, preview_rows, None,
                 f"Apply failed. No deductions were committed: {exc}", None,
             )
-
-    conn.close()
 
     summary = {
         "orders_seen": len(orders),

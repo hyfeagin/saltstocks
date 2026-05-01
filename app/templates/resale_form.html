@@ -90,9 +90,9 @@
 
       <div>
         <label>Status</label>
-        {% set s = item['status'] if item else 'unlisted' %}
+        {% set s = item['status'] if item else RESALE_STATUSES[0] %}
         <select name="status">
-          {% for opt in ['unlisted','listed','sold','donated','trashed'] %}
+          {% for opt in RESALE_STATUSES %}
             <option value="{{ opt }}" {{ 'selected' if s==opt else '' }}>{{ opt }}</option>
           {% endfor %}
         </select>
@@ -100,9 +100,9 @@
 
       <div>
         <label>Channel</label>
-        {% set c = item['channel'] if item else 'unassigned' %}
+        {% set c = item['channel'] if item else RESALE_CHANNELS[0] %}
         <select name="channel">
-          {% for opt in ['unassigned','ebay','etsy','shopify','local','mercari','whatnot'] %}
+          {% for opt in RESALE_CHANNELS %}
             <option value="{{ opt }}" {{ 'selected' if c==opt else '' }}>{{ opt }}</option>
           {% endfor %}
         </select>

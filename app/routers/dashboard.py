@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import shutil
+import sqlite3
 from datetime import datetime
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ..db import get_conn, DB_PATH
-from ..deps import templates, BACKUP_DIR
+from ..db import DB_PATH
+from ..deps import templates, BACKUP_DIR, get_db
 
 router = APIRouter()
 
@@ -17,8 +18,7 @@ router = APIRouter()
 # (Dashboard counts for resale inventory status)
 # =========================
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request):
-    conn = get_conn()
+def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     resale_count = conn.execute(
         "SELECT COUNT(*) AS c FROM items WHERE item_type='resale'"
     ).fetchone()["c"]
@@ -38,7 +38,6 @@ def dashboard(request: Request):
         WHERE item_type='resale' AND qty_on_hand <= 0
         """
     ).fetchone()["c"]
-    conn.close()
     return templates.TemplateResponse(
         "dashboard.html",
         {"request": request, "resale_count": resale_count, "unlisted": unlisted, "low_qty": low_qty},

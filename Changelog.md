@@ -4,6 +4,40 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [1.8.0] — 2026-04-30
+
+### Refactored — `clean_str()` Helper for Strip-or-None Pattern
+
+- Added `clean_str(val, default=None)` to `app/utils.py` — strips whitespace and returns `default` (None by default) when the result is empty.
+- Replaced 17 occurrences of `x.strip() or None` / `x.strip() or "default"` in `resale.py` and 8 occurrences of `(x or "").strip()` / `(x or "default").strip()` in `config.py`.
+
+### Refactored — Constants File for Status/Channel/Environment Values
+
+- New `app/constants.py` is the single source of truth for all hardcoded string enums: `RESALE_STATUSES`, `RESALE_CHANNELS`, `EBAY_ENVIRONMENTS`, `ITEM_TYPE_RESALE`, and their defaults.
+- Default values derive directly from the lists (`DEFAULT_STATUS = RESALE_STATUSES[0]`) so they can never drift out of sync.
+- Constants registered as Jinja2 template globals in `app/deps.py` — all templates receive them automatically with no per-route changes needed.
+- All three routers (`resale.py`, `config.py`, `ebay.py`) and `app/utils.py` updated to import from constants.
+- Status and channel dropdowns in `resale_form.html`, `resale_list.html`, and the environment dropdown in `config.html` now loop over the constant lists. Adding a new status or channel is a one-line change in `constants.py`.
+
+---
+
+## [1.7.0] — 2026-04-30
+
+### Refactored — DB Connection Dependency Injection
+
+- Replaced the manual `conn = get_conn()` / `conn.close()` pattern (27 call sites, 16 close calls) across all routers with a FastAPI `Depends(get_db)` dependency.
+- Added `get_db()` generator to `app/deps.py` — yields an open connection and closes it in a `finally` block, guaranteeing cleanup on every request including exceptions and early returns.
+- All four routers updated: `dashboard.py`, `config.py`, `resale.py`, `ebay.py`.
+- Connection leaks are now structurally impossible — the framework owns the lifecycle.
+
+### Added — CLI Launch with Auto-Open Browser
+
+- New `app/cli.py` entry point replaces the manual run-script + navigate workflow.
+- Run `python3 -m app.cli serve` from the project directory to start the server and open the browser automatically.
+- Supports `--port`, `--no-browser`, and `--no-reload` flags.
+
+---
+
 ## [1.6.0] — 2026-03-25
 
 ### Added — eBay OAuth In-App Token Flow

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Form, Request
+import sqlite3
+
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from ..db import get_conn
-from ..deps import templates
-from ..utils import normalize_code, get_ebay_profile_bundle, missing_ebay_credentials
+from ..constants import EBAY_ENVIRONMENTS, DEFAULT_ENVIRONMENT
+from ..deps import templates, get_db
+from ..utils import clean_str, normalize_code, get_ebay_profile_bundle, missing_ebay_credentials
 
 router = APIRouter()
 
@@ -15,8 +17,7 @@ router = APIRouter()
 # (List/create/update/delete config codes)
 # =========================
 @router.get("/config", response_class=HTMLResponse)
-def config_home(request: Request, saved_ebay: int = 0, oauth: int = 0):
-    conn = get_conn()
+def config_home(request: Request, saved_ebay: int = 0, oauth: int = 0, conn: sqlite3.Connection = Depends(get_db)):
     codes = conn.execute(
         "SELECT * FROM codes ORDER BY kind ASC, code ASC"
     ).fetchall()
@@ -24,7 +25,6 @@ def config_home(request: Request, saved_ebay: int = 0, oauth: int = 0):
         "SELECT * FROM categories ORDER BY name ASC"
     ).fetchall()
     ebay_bundle = get_ebay_profile_bundle(conn)
-    conn.close()
     return templates.TemplateResponse(
         "config.html",
         {
@@ -46,18 +46,17 @@ def config_code_create(
     code: str = Form(...),
     label: str = Form(...),
     kind: str = Form("item"),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
     code_n = normalize_code(code)
-    label_n = (label or "").strip()
-    kind_n = (kind or "item").strip()
+    label_n = clean_str(label, "")
+    kind_n = clean_str(kind, "item")
 
-    conn = get_conn()
     with conn:
         conn.execute(
             "INSERT OR IGNORE INTO codes(code, label, kind, is_active) VALUES (?,?,?,1)",
             (code_n, label_n, kind_n),
         )
-    conn.close()
     return RedirectResponse(url="/config", status_code=303)
 
 
@@ -67,8 +66,8 @@ def config_code_update(
     label: str = Form(...),
     kind: str = Form("item"),
     is_active: int = Form(1),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
-    conn = get_conn()
     with conn:
         conn.execute(
             """
@@ -76,18 +75,15 @@ def config_code_update(
             SET label=?, kind=?, is_active=?, updated_at=datetime('now')
             WHERE id=?
             """,
-            ((label or "").strip(), (kind or "item").strip(), 1 if int(is_active) == 1 else 0, code_id),
+            (clean_str(label, ""), clean_str(kind, "item"), 1 if int(is_active) == 1 else 0, code_id),
         )
-    conn.close()
     return RedirectResponse(url="/config", status_code=303)
 
 
 @router.post("/config/codes/{code_id}/delete")
-def config_code_delete(code_id: int):
-    conn = get_conn()
+def config_code_delete(code_id: int, conn: sqlite3.Connection = Depends(get_db)):
     with conn:
         conn.execute("DELETE FROM codes WHERE id=?", (code_id,))
-    conn.close()
     return RedirectResponse(url="/config", status_code=303)
 # =========================
 # ANCHOR: CONFIG_CODES_CRUD_END
@@ -99,28 +95,25 @@ def config_code_delete(code_id: int):
 # (List/create/update/toggle config categories)
 # =========================
 @router.post("/config/categories/new")
-def config_category_create(name: str = Form(...)):
-    name_n = (name or "").strip()
+def config_category_create(name: str = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+    name_n = clean_str(name, "")
     if not name_n:
         return RedirectResponse(url="/config", status_code=303)
 
-    conn = get_conn()
     with conn:
         conn.execute(
             "INSERT OR IGNORE INTO categories(name, is_active) VALUES (?, 1)",
             (name_n,),
         )
-    conn.close()
     return RedirectResponse(url="/config", status_code=303)
 
 
 @router.post("/config/categories/{category_id}/update")
-def config_category_update(category_id: int, name: str = Form(...)):
-    name_n = (name or "").strip()
+def config_category_update(category_id: int, name: str = Form(...), conn: sqlite3.Connection = Depends(get_db)):
+    name_n = clean_str(name, "")
     if not name_n:
         return RedirectResponse(url="/config", status_code=303)
 
-    conn = get_conn()
     with conn:
         conn.execute(
             """
@@ -130,13 +123,11 @@ def config_category_update(category_id: int, name: str = Form(...)):
             """,
             (name_n, category_id),
         )
-    conn.close()
     return RedirectResponse(url="/config", status_code=303)
 
 
 @router.post("/config/categories/{category_id}/toggle")
-def config_category_toggle(category_id: int):
-    conn = get_conn()
+def config_category_toggle(category_id: int, conn: sqlite3.Connection = Depends(get_db)):
     with conn:
         conn.execute(
             """
@@ -147,7 +138,6 @@ def config_category_toggle(category_id: int):
             """,
             (category_id,),
         )
-    conn.close()
     return RedirectResponse(url="/config", status_code=303)
 # =========================
 # ANCHOR: CONFIG_CATEGORIES_CRUD_END
@@ -167,15 +157,15 @@ def ebay_settings_page():
 def ebay_settings_save(
     client_id: str = Form(""),
     client_secret: str = Form(""),
-    environment: str = Form("SANDBOX"),
+    environment: str = Form(DEFAULT_ENVIRONMENT),
     refresh_token: str = Form(""),
     ru_name: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
-    env_value = (environment or "SANDBOX").strip().upper()
-    if env_value not in {"PRODUCTION", "SANDBOX"}:
-        env_value = "SANDBOX"
+    env_value = (environment or DEFAULT_ENVIRONMENT).strip().upper()
+    if env_value not in EBAY_ENVIRONMENTS:
+        env_value = DEFAULT_ENVIRONMENT
 
-    conn = get_conn()
     with conn:
         conn.execute(
             """
@@ -190,10 +180,10 @@ def ebay_settings_save(
             """,
             (
                 env_value,
-                (client_id or "").strip(),
-                (client_secret or "").strip(),
-                (refresh_token or "").strip(),
-                (ru_name or "").strip(),
+                clean_str(client_id, ""),
+                clean_str(client_secret, ""),
+                clean_str(refresh_token, ""),
+                clean_str(ru_name, ""),
             ),
         )
         conn.execute(
@@ -206,7 +196,6 @@ def ebay_settings_save(
             """,
             (env_value,),
         )
-    conn.close()
     return RedirectResponse(url="/config?saved_ebay=1#ebay-settings", status_code=303)
 # =========================
 # ANCHOR: EBAY_SETTINGS_END

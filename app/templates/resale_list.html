@@ -71,7 +71,7 @@
         <label>Status</label>
         <select name="status">
           <option value="">(no change)</option>
-          {% for opt in ['unlisted','listed','sold','donated','trashed'] %}
+          {% for opt in RESALE_STATUSES %}
             <option value="{{ opt }}">{{ opt }}</option>
           {% endfor %}
         </select>
@@ -81,7 +81,7 @@
         <label>Channel</label>
         <select name="channel">
           <option value="">(no change)</option>
-          {% for opt in ['unassigned','ebay','etsy','shopify','local','mercari','whatnot'] %}
+          {% for opt in RESALE_CHANNELS %}
             <option value="{{ opt }}">{{ opt }}</option>
           {% endfor %}
         </select>

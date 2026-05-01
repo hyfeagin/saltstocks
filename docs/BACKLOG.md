@@ -328,6 +328,30 @@ Include: **TOTAL OWED TO HOLLY**
 
 ---
 
+### [ ] pywebview — Native App Window
+
+**Goal:** Wrap the SaltStocks web UI in a native macOS window using `pywebview` so it launches and feels like a desktop app — no browser tab, no address bar, no manual navigation.
+
+**Approach:**
+- Add `pywebview` to `requirements.txt`
+- Add a `window` subcommand to `app/cli.py` that starts uvicorn in a background thread and opens the app in a native webview window
+- User runs `python3 -m app.cli window` to get the desktop experience
+
+**Acceptance criteria:**
+- App opens in a native window without requiring a browser
+- Window title shows "SaltStocks"
+- Closing the window also stops the server cleanly
+- Falls back gracefully if pywebview is not installed (prints instructions)
+
+**Notes:**
+- `pywebview` uses macOS WKWebView under the hood — no Electron, no extra runtime
+- Can coexist with the existing `serve` subcommand; `window` is just an alternative launch mode
+- Consider adding a macOS `.app` wrapper or `run.command` shortcut that calls `window` instead of `serve`
+
+**Files:** `app/cli.py`, `requirements.txt`
+
+---
+
 ### [ ] Auto-Launch on Mac (Terminal Double-Click)
 
 **Goal:** Make it easy to start SaltStocks without opening Terminal and typing commands — double-click a file to launch.
@@ -574,7 +598,7 @@ These are internal improvements with no user-visible behavior change. Safe to do
 
 ---
 
-### [ ] DB Connection Dependency Injection
+### [x] DB Connection Dependency Injection
 
 **Priority:** High — resource safety + DRY
 
@@ -600,7 +624,7 @@ def resale_list(request: Request, conn = Depends(get_db)):
 
 ---
 
-### [ ] `clean_str()` Helper for Strip-or-None Pattern
+### [x] `clean_str()` Helper for Strip-or-None Pattern
 
 **Priority:** High — DRY
 
@@ -617,7 +641,7 @@ def clean_str(val: str, default: Optional[str] = None) -> Optional[str]:
 
 ---
 
-### [ ] Constants File for Status/Channel/Environment Values
+### [x] Constants File for Status/Channel/Environment Values
 
 **Priority:** High — single source of truth
 

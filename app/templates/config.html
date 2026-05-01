@@ -31,8 +31,9 @@
       <div>
         <label>Environment</label>
         <select name="environment" id="ebay-environment">
-          <option value="SANDBOX" {{ 'selected' if ebay_active_environment == 'SANDBOX' else '' }}>SANDBOX</option>
-          <option value="PRODUCTION" {{ 'selected' if ebay_active_environment == 'PRODUCTION' else '' }}>PRODUCTION</option>
+          {% for env in EBAY_ENVIRONMENTS %}
+            <option value="{{ env }}" {{ 'selected' if ebay_active_environment == env else '' }}>{{ env }}</option>
+          {% endfor %}
         </select>
       </div>
       <div></div>

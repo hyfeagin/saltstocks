@@ -3,6 +3,14 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+from .constants import EBAY_ENVIRONMENTS, DEFAULT_ENVIRONMENT
+
+
+def clean_str(val: str, default: Optional[str] = None) -> Optional[str]:
+    """Strip whitespace from val; return default if the result is empty."""
+    cleaned = (val or "").strip()
+    return default if not cleaned else cleaned
+
 
 def normalize_code(s: str) -> str:
     s = (s or "").strip().upper()
@@ -48,18 +56,15 @@ def _empty_ebay_profile() -> Dict[str, Optional[str]]:
 
 
 def get_ebay_profile_bundle(conn: sqlite3.Connection) -> Dict[str, Any]:
-    profiles = {
-        "SANDBOX": _empty_ebay_profile(),
-        "PRODUCTION": _empty_ebay_profile(),
-    }
+    profiles = {env: _empty_ebay_profile() for env in EBAY_ENVIRONMENTS}
 
     try:
         active_row = conn.execute(
             "SELECT active_environment FROM ebay_state WHERE id=1"
         ).fetchone()
-        active_environment = (active_row["active_environment"] if active_row else "SANDBOX") or "SANDBOX"
-        if active_environment not in {"PRODUCTION", "SANDBOX"}:
-            active_environment = "SANDBOX"
+        active_environment = (active_row["active_environment"] if active_row else DEFAULT_ENVIRONMENT) or DEFAULT_ENVIRONMENT
+        if active_environment not in EBAY_ENVIRONMENTS:
+            active_environment = DEFAULT_ENVIRONMENT
 
         rows = conn.execute(
             "SELECT environment, client_id, client_secret, refresh_token, ru_name, updated_at FROM ebay_credentials"
@@ -79,10 +84,10 @@ def get_ebay_profile_bundle(conn: sqlite3.Connection) -> Dict[str, Any]:
         legacy_row = conn.execute(
             "SELECT client_id, client_secret, environment, refresh_token, updated_at FROM ebay_settings WHERE id=1"
         ).fetchone()
-        active_environment = "SANDBOX"
+        active_environment = DEFAULT_ENVIRONMENT
         if legacy_row:
-            legacy_env = (legacy_row["environment"] or "SANDBOX").upper()
-            if legacy_env in {"PRODUCTION", "SANDBOX"}:
+            legacy_env = (legacy_row["environment"] or DEFAULT_ENVIRONMENT).upper()
+            if legacy_env in EBAY_ENVIRONMENTS:
                 active_environment = legacy_env
             profiles[active_environment] = {
                 "client_id": legacy_row["client_id"] or "",

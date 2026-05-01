@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>eBay Authorization Error</h1>
+<div class="card" style="border-color:#c4756a;">
+  <b>Error:</b> {{ error_message }}
+</div>
+<div style="margin-top:16px;">
+  <a href="/config#ebay-settings" class="btn">Back to Settings</a>
+</div>
+{% endblock %}

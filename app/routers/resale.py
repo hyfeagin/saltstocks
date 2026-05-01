@@ -5,12 +5,12 @@ import io
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 
-from ..db import get_conn
-from ..deps import templates
-from ..utils import normalize_code, get_next_sku
+from ..constants import DEFAULT_CHANNEL, DEFAULT_STATUS
+from ..deps import templates, get_db
+from ..utils import clean_str, normalize_code, get_next_sku
 
 router = APIRouter()
 
@@ -37,8 +37,7 @@ def _fetch_resale_rows(conn: sqlite3.Connection) -> list:
 # (List and search resale inventory)
 # =========================
 @router.get("/resale", response_class=HTMLResponse)
-def resale_list(request: Request, q: Optional[str] = None):
-    conn = get_conn()
+def resale_list(request: Request, q: Optional[str] = None, conn: sqlite3.Connection = Depends(get_db)):
     params: Dict[str, Any] = {}
     where = "WHERE i.item_type='resale'"
     if q:
@@ -60,7 +59,6 @@ def resale_list(request: Request, q: Optional[str] = None):
         """,
         params,
     ).fetchall()
-    conn.close()
     return templates.TemplateResponse(
         "resale_list.html",
         {"request": request, "rows": rows, "q": q or ""},
@@ -76,8 +74,7 @@ def resale_list(request: Request, q: Optional[str] = None):
 # Must be registered before /{item_id}/edit to avoid path conflict.
 # =========================
 @router.get("/resale/export")
-def resale_export_csv():
-    conn = get_conn()
+def resale_export_csv(conn: sqlite3.Connection = Depends(get_db)):
     rows = conn.execute(
         """
         SELECT
@@ -105,7 +102,6 @@ def resale_export_csv():
         ORDER BY i.updated_at DESC
         """
     ).fetchall()
-    conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -130,8 +126,8 @@ def resale_export_csv():
             r["condition"] or "",
             r["tags"] or "",
             r["notes"] or "",
-            r["status"] or "unlisted",
-            r["channel"] or "unassigned",
+            r["status"] or DEFAULT_STATUS,
+            r["channel"] or DEFAULT_CHANNEL,
             r["list_price"] if r["list_price"] is not None else "",
             r["url"] or "",
         ])
@@ -160,6 +156,7 @@ def resale_bulk_update(
     location: str = Form(""),
     append_tags: str = Form(""),
     unit_cost: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
     if not item_id:
         return RedirectResponse(url="/resale", status_code=303)
@@ -177,7 +174,6 @@ def resale_bulk_update(
         except ValueError:
             unit_cost_value = None
 
-    conn = get_conn()
     with conn:
         if location:
             conn.executemany(
@@ -230,10 +226,9 @@ def resale_bulk_update(
                 else:
                     conn.execute(
                         "INSERT INTO resale_listings (item_id, channel, status) VALUES (?, ?, ?)",
-                        (i, channel or "unassigned", status or "unlisted"),
+                        (i, channel or DEFAULT_CHANNEL, status or DEFAULT_STATUS),
                     )
 
-    conn.close()
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
 # ANCHOR: RESALE_BULK_UPDATE_END
@@ -250,6 +245,7 @@ async def resale_import_csv(
     request: Request,
     file: UploadFile = File(...),
     mode: str = Form("update"),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
     """
     CSV import rules:
@@ -302,9 +298,7 @@ async def resale_import_csv(
     skipped = 0
 
     if not reader.fieldnames:
-        conn = get_conn()
         rows = _fetch_resale_rows(conn)
-        conn.close()
         return templates.TemplateResponse(
             "resale_list.html",
             {
@@ -318,7 +312,6 @@ async def resale_import_csv(
             },
         )
 
-    conn = get_conn()
     with conn:
         for row_num, row in enumerate(reader, start=2):
             if not any(normalize_empty(value) for key, value in row.items() if key in known_fields):
@@ -428,8 +421,8 @@ async def resale_import_csv(
                         ),
                     )
                     new_id = cur.lastrowid
-                    status_val = get_value("status") or "unlisted"
-                    channel_val = get_value("channel") or "unassigned"
+                    status_val = get_value("status") or DEFAULT_STATUS
+                    channel_val = get_value("channel") or DEFAULT_CHANNEL
                     url_val = get_value("url")
                     conn.execute(
                         "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
@@ -524,8 +517,8 @@ async def resale_import_csv(
                                 "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
                                 (
                                     item_id,
-                                    channel_val or "unassigned",
-                                    status_val or "unlisted",
+                                    channel_val or DEFAULT_CHANNEL,
+                                    status_val or DEFAULT_STATUS,
                                     list_price_val,
                                     url_val,
                                 ),
@@ -540,8 +533,6 @@ async def resale_import_csv(
                 errors.append(f"Row {row_num}: {exc}")
 
     rows = _fetch_resale_rows(conn)
-    conn.close()
-
     return templates.TemplateResponse(
         "resale_list.html",
         {
@@ -567,15 +558,13 @@ async def resale_import_csv(
 # (Render the resale item creation form)
 # =========================
 @router.get("/resale/new", response_class=HTMLResponse)
-def resale_new_form(request: Request):
-    conn = get_conn()
+def resale_new_form(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     codes = conn.execute(
         "SELECT code, label FROM codes WHERE is_active=1 AND kind IN ('item','material') ORDER BY kind ASC, code ASC"
     ).fetchall()
     categories = conn.execute(
         "SELECT name, is_active FROM categories WHERE is_active=1 ORDER BY name ASC"
     ).fetchall()
-    conn.close()
     return templates.TemplateResponse(
         "resale_form.html",
         {"request": request, "mode": "new", "item": None, "codes": codes, "categories": categories},
@@ -602,10 +591,11 @@ def resale_create(
     condition: str = Form(""),
     tags: str = Form(""),
     notes: str = Form(""),
-    status: str = Form("unlisted"),
-    channel: str = Form("unassigned"),
+    status: str = Form(DEFAULT_STATUS),
+    channel: str = Form(DEFAULT_CHANNEL),
     list_price: Optional[float] = Form(None),
     url: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
     """
     Creates a resale item with auto-generated SKU:
@@ -615,7 +605,6 @@ def resale_create(
     company_n = normalize_code(company) or "GV"
     code = normalize_code(brand_code) or "MISC"
 
-    conn = get_conn()
     with conn:
         sku_final = get_next_sku(conn, company_n, code)
         cur = conn.execute(
@@ -633,26 +622,25 @@ def resale_create(
             """,
             (
                 company_n,
-                category.strip() or None,
+                clean_str(category),
                 code,
-                ip.strip() or None,
+                clean_str(ip),
                 sku_final,
                 name.strip(),
                 qty_on_hand,
                 unit_cost,
-                location.strip() or None,
-                condition.strip() or None,
-                tags.strip() or None,
-                notes.strip() or None,
+                clean_str(location),
+                clean_str(condition),
+                clean_str(tags),
+                clean_str(notes),
             ),
         )
         item_id = cur.lastrowid
         conn.execute(
             "INSERT INTO resale_listings (item_id, channel, status, list_price, url) VALUES (?, ?, ?, ?, ?)",
-            (item_id, channel.strip() or "unassigned", status.strip() or "unlisted", list_price, url.strip() or None),
+            (item_id, clean_str(channel, DEFAULT_CHANNEL), clean_str(status, DEFAULT_STATUS), list_price, clean_str(url)),
         )
 
-    conn.close()
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
 # ANCHOR: RESALE_CREATE_DB_WRITE_END
@@ -664,8 +652,7 @@ def resale_create(
 # (Render resale item edit form)
 # =========================
 @router.get("/resale/{item_id}/edit", response_class=HTMLResponse)
-def resale_edit_form(request: Request, item_id: int):
-    conn = get_conn()
+def resale_edit_form(request: Request, item_id: int, conn: sqlite3.Connection = Depends(get_db)):
     item = conn.execute(
         """
         SELECT
@@ -687,7 +674,6 @@ def resale_edit_form(request: Request, item_id: int):
         "SELECT name, is_active FROM categories WHERE is_active=1 OR name=? ORDER BY name ASC",
         (item["category"] if item else "",),
     ).fetchall()
-    conn.close()
 
     if not item:
         return RedirectResponse(url="/resale", status_code=303)
@@ -723,10 +709,11 @@ def resale_update(
     condition: str = Form(""),
     tags: str = Form(""),
     notes: str = Form(""),
-    status: str = Form("unlisted"),
-    channel: str = Form("unassigned"),
+    status: str = Form(DEFAULT_STATUS),
+    channel: str = Form(DEFAULT_CHANNEL),
     list_price: Optional[float] = Form(None),
     url: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
 ):
     """
     Updates an existing resale item.
@@ -736,13 +723,11 @@ def resale_update(
     company_n = normalize_code(company) or "GV"
     code = normalize_code(brand_code) or "MISC"
 
-    conn = get_conn()
     with conn:
         existing_item = conn.execute(
             "SELECT id, sku FROM items WHERE id=? AND item_type='resale'", (item_id,)
         ).fetchone()
         if not existing_item:
-            conn.close()
             return RedirectResponse(url="/resale", status_code=303)
 
         conn.execute(
@@ -754,23 +739,23 @@ def resale_update(
             """,
             (
                 company_n,
-                category.strip() or None,
+                clean_str(category),
                 code,
-                ip.strip() or None,
+                clean_str(ip),
                 name.strip(),
                 qty_on_hand,
                 unit_cost,
-                location.strip() or None,
-                condition.strip() or None,
-                tags.strip() or None,
-                notes.strip() or None,
+                clean_str(location),
+                clean_str(condition),
+                clean_str(tags),
+                clean_str(notes),
                 item_id,
             ),
         )
 
-        channel_v = channel.strip() or "unassigned"
-        status_v = status.strip() or "unlisted"
-        url_v = url.strip() or None
+        channel_v = clean_str(channel, DEFAULT_CHANNEL)
+        status_v = clean_str(status, DEFAULT_STATUS)
+        url_v = clean_str(url)
 
         existing_listing = conn.execute(
             "SELECT id FROM resale_listings WHERE item_id=?", (item_id,)
@@ -791,7 +776,6 @@ def resale_update(
                 (item_id, channel_v, status_v, list_price, url_v),
             )
 
-    conn.close()
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
 # ANCHOR: RESALE_UPDATE_DB_WRITE_END
@@ -803,14 +787,12 @@ def resale_update(
 # (Adjust resale item quantity on hand)
 # =========================
 @router.post("/resale/{item_id}/adjust")
-def resale_adjust_qty(item_id: int, delta: float = Form(...)):
-    conn = get_conn()
+def resale_adjust_qty(item_id: int, delta: float = Form(...), conn: sqlite3.Connection = Depends(get_db)):
     with conn:
         conn.execute(
             "UPDATE items SET qty_on_hand = qty_on_hand + ? WHERE id = ? AND item_type='resale'",
             (delta, item_id),
         )
-    conn.close()
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
 # ANCHOR: RESALE_ADJUST_QTY_END
