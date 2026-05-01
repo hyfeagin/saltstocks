@@ -306,25 +306,25 @@ Include: **TOTAL OWED TO HOLLY**
 
 ---
 Cancelled Business is moving to wholesale model and Recipes and batch making will no longer be the used as a business model
-~~~### [ ] Umivera COGS — Materials, Recipes & Batch Costing
+~~## [ ] Umivera COGS — Materials, Recipes & Batch Costing~~
 
-**Goal:** Build the production cost tracking side of SaltStocks for Umivera bath salt products. Track what materials go into each product, calculate cost per unit, and record production batches.
+~~**Goal:** Build the production cost tracking side of SaltStocks for Umivera bath salt products. Track what materials go into each product, calculate cost per unit, and record production batches.~~
 
-**Data model:**
-- `materials` table — ingredient inventory (name, unit, unit_cost, qty_on_hand)
-- `recipes` table — each Umivera product SKU has a recipe
-- `recipe_lines` table — (recipe_id, material_id, qty_per_batch)
-- `batches` table — a production run (recipe_id, batch_size, date, notes)
-- On batch save: deduct material qty, calculate total COGS, record cost per unit on the finished item
+~~**Data model:**~~
+~~- `materials` table — ingredient inventory (name, unit, unit_cost, qty_on_hand)~~
+~~- `recipes` table — each Umivera product SKU has a recipe~~
+~~- `recipe_lines` table — (recipe_id, material_id, qty_per_batch)~~
+~~- `batches` table — a production run (recipe_id, batch_size, date, notes)~~
+~~- On batch save: deduct material qty, calculate total COGS, record cost per unit on the finished item~~
 
-**Acceptance criteria:**
-- Can define a recipe for a product (e.g., "16oz Lavender Bath Salts" uses X oz salt, Y oz oil, Z jar)
-- Can record a batch (units produced, date)
-- COGS per unit is calculated and stored on the item record
-- Material stock is decremented when a batch is recorded
-- Report shows COGS per batch and per unit
+~~**Acceptance criteria:**~~
+~~- Can define a recipe for a product (e.g., "16oz Lavender Bath Salts" uses X oz salt, Y oz oil, Z jar)~~
+~~- Can record a batch (units produced, date)~~
+~~- COGS per unit is calculated and stored on the item record~~
+~~- Material stock is decremented when a batch is recorded~~
+~~- Report shows COGS per batch and per unit~~
 
-**Files:** new tables in `app/migrate.py`, new routes + templates, separate from resale flows~~~
+~~**Files:** new tables in `app/migrate.py`, new routes + templates, separate from resale flows~~
 
 ---
 
