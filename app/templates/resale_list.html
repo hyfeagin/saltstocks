@@ -1,160 +1,437 @@
 {% extends "base.html" %}
 {% from "macros.html" import status_select_with_blank, channel_select_with_blank %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+{% endblock %}
+
 {% block content %}
-<h1>Resale Inventory</h1>
-
-<div class="card">
-  <form method="get" action="/resale" class="row">
+<div class="rs-page">
+  <header class="rs-page-header">
     <div>
-      <label>Search</label>
-      <input name="q" value="{{ q }}" placeholder="name, sku, tags..." />
+      <h1>Resale Inventory</h1>
+      <p class="rs-subtitle">Search, import, bulk update, and manage resale items from one page.</p>
     </div>
-    <div style="align-self:end">
-      <button class="btn" type="submit">Search</button>
-      <a class="btn btn-primary" href="/resale/new" style="text-decoration:none; display:inline-block;">Add Item</a>
+    <div class="rs-actions">
+      <a class="rs-btn rs-btn-ghost" href="/resale/export">Export CSV</a>
+      <a class="rs-btn rs-btn-primary" href="/resale/new">Add Item</a>
     </div>
-  </form>
-</div>
+  </header>
 
-<div class="card">
-  <h3>Excel (CSV) Import/Export</h3>
-  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:end;">
-    <a class="btn" href="/resale/export" style="text-decoration:none; display:inline-block;">Export CSV</a>
-
-    <form method="post" action="/resale/import" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:end;">
-      <div>
-        <label>Import mode</label>
-        <select name="mode">
-          <option value="update">Replace tags from CSV</option>
-          <option value="append_tags" selected>Append tags from CSV</option>
-        </select>
+  <section class="rs-search-shell">
+    <form method="get" action="/resale" class="rs-search-form">
+      <label class="rs-search-label" for="resale-search">Search</label>
+      <div class="rs-search-row">
+        <input id="resale-search" name="q" value="{{ q }}" placeholder="name, sku, tags..." />
+        <button class="rs-btn rs-btn-primary" type="submit">Search</button>
       </div>
-      <div>
-        <label>CSV file</label>
-        <input type="file" name="file" accept=".csv" required />
-      </div>
-      <button class="btn btn-primary" type="submit">Import Updates</button>
     </form>
-  </div>
+  </section>
 
-  <p class="muted">
-    Safety: Blank <b>id</b> creates a new item, existing <b>id</b> updates that item. Unknown columns are ignored.
-  </p>
-
-  {% if import_summary %}
-  <div class="card" style="margin-top:12px;">
-    <h4>Import summary</h4>
-    <ul>
-      <li>Rows processed: {{ import_summary.processed }}</li>
-      <li>Created: {{ import_summary.created }}</li>
-      <li>Updated: {{ import_summary.updated }}</li>
-      <li>Skipped: {{ import_summary.skipped }}</li>
-    </ul>
-    {% if import_summary.errors %}
-      <div class="muted">Errors:</div>
-      <ul>
-        {% for err in import_summary.errors %}
-          <li class="muted">{{ err }}</li>
-        {% endfor %}
-      </ul>
-    {% endif %}
-  </div>
-  {% endif %}
-</div>
-
-
-<form method="post" action="/resale/bulk-update" id="bulkForm">
-  <div class="card">
-    <h3>Bulk edit (applies to selected rows)</h3>
-
-    <div class="row">
-      <div>
-        <label>Status</label>
-        {{ status_select_with_blank() }}
-      </div>
-
-      <div>
-        <label>Channel</label>
-        {{ channel_select_with_blank() }}
-      </div>
-
-      <div>
-        <label>Location</label>
-        <input name="location" placeholder="(no change) e.g. Tote A3" />
-      </div>
-
-      <div>
-        <label>Append tags</label>
-        <input name="append_tags" placeholder="e.g. lego, starwars, hero" />
-      </div>
-
-      <div>
-        <label>Set unit cost ($ per each)</label>
-        <input type="number" step="0.01" name="unit_cost" placeholder="(no change)" />
-        <div class="muted">Applies the same unit cost to all selected items.</div>
-      </div>
-
-      <div style="align-self:end">
-        <button class="btn btn-primary" type="submit">Apply bulk changes</button>
-        <div class="muted">Select items in the table first.</div>
-      </div>
+  <section class="rs-tabs-shell">
+    <div class="rs-tab-bar" role="tablist" aria-label="Resale page sections">
+      <button class="rs-tab {{ 'is-active' if active_resale_tab == 'inventory' else '' }}" type="button" data-tab-target="inventory" role="tab" aria-selected="{{ 'true' if active_resale_tab == 'inventory' else 'false' }}">Inventory</button>
+      <button class="rs-tab {{ 'is-active' if active_resale_tab == 'import' else '' }}" type="button" data-tab-target="import" role="tab" aria-selected="{{ 'true' if active_resale_tab == 'import' else 'false' }}">Import</button>
+      <button class="rs-tab {{ 'is-active' if active_resale_tab == 'bulk' else '' }}" type="button" data-tab-target="bulk" role="tab" aria-selected="{{ 'true' if active_resale_tab == 'bulk' else 'false' }}">Bulk Edit</button>
     </div>
-  </div>
-</form>
 
-<table>
-    <thead>
-      <tr>
-        <th style="width:40px;">
-          <input type="checkbox" onclick="toggleAll(this)">
-        </th>
-        <th>Item</th>
-        <th>Qty</th>
-        <th>Cost</th>
-        <th>Status</th>
-        <th>Where</th>
-        <th>Adjust</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in rows %}
-      <tr>
-        <td>
-          <input type="checkbox" name="item_id" value="{{ r['id'] }}" form="bulkForm">
-        </td>
-        <td>
-          <div><b>{{ r["name"] }}</b></div>
-          <div class="muted">SKU: {{ r["sku"] or "-" }} · {{ r["condition"] or "-" }}</div>
-          {% if r["tags"] %}<div class="muted">Tags: {{ r["tags"] }}</div>{% endif %}
-          {% if r["notes"] %}<div class="muted">Notes: {{ r["notes"] }}</div>{% endif %}
-        </td>
-        <td>{{ "%.2f"|format(r["qty_on_hand"]) }}</td>
-        <td>${{ "%.2f"|format(r["unit_cost"]) }} / each</td>
-        <td>
-          <span class="pill">{{ r["status"] }}</span>
-          <div class="muted">{{ r["channel"] }}</div>
-          {% if r["list_price"] %}<div class="muted">List: ${{ "%.2f"|format(r["list_price"]) }}</div>{% endif %}
-        </td>
-        <td>{{ r["location"] or "-" }}</td>
-        <td>
-          <form method="post" action="/resale/{{ r['id'] }}/adjust" style="display:flex; gap:8px;">
-            <input type="number" step="1" name="delta" value="1" style="width:90px;" />
-            <button class="btn" type="submit">Apply</button>
-          </form>
-          <div class="muted">Use -1 to deduct</div>
-        </td>
-        <td><a href="/resale/{{ r['id'] }}/edit">Edit</a></td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+    <section class="rs-tab-panel {{ 'is-active' if active_resale_tab == 'inventory' else '' }}" data-tab-panel="inventory" role="tabpanel" {{ 'hidden' if active_resale_tab != 'inventory' else '' }}>
+      <div class="rs-inventory-toolbar">
+        <div class="rs-select-controls">
+          <label class="rs-master-check">
+            <input id="rs-select-all" type="checkbox" />
+            <span>Select all</span>
+          </label>
+          <span class="rs-selection-count" id="rs-selection-count">0 selected</span>
+        </div>
 
+        <div class="rs-view-toggle" role="group" aria-label="Inventory view mode">
+          <button class="rs-view-btn is-active" type="button" data-view-mode="cards">Card List</button>
+          <button class="rs-view-btn" type="button" data-view-mode="kanban">Kanban</button>
+        </div>
+      </div>
+
+      <form method="post" action="/resale/bulk-update" id="bulkInlineForm" class="rs-bulk-bar" hidden>
+        <div class="rs-bulk-bar-main">
+          <span class="rs-bulk-count" id="rs-bulk-inline-count">0 selected</span>
+          <div class="rs-bulk-grid">
+            <div class="rs-field">
+              <label>Status</label>
+              {{ status_select_with_blank("status") }}
+            </div>
+            <div class="rs-field">
+              <label>Channel</label>
+              {{ channel_select_with_blank("channel") }}
+            </div>
+            <div class="rs-field">
+              <label>Location</label>
+              <input name="location" placeholder="e.g. Tote A3" />
+            </div>
+            <div class="rs-field">
+              <label>Append tags</label>
+              <input name="append_tags" placeholder="lego, starwars..." />
+            </div>
+            <div class="rs-field">
+              <label>Unit cost ($)</label>
+              <input type="number" step="0.01" name="unit_cost" placeholder="(no change)" />
+            </div>
+            <div class="rs-field rs-field-action">
+              <label>&nbsp;</label>
+              <button class="rs-btn rs-btn-primary" type="submit">Apply</button>
+            </div>
+          </div>
+        </div>
+        <div class="rs-bulk-targets" data-bulk-targets></div>
+      </form>
+
+      <div class="rs-view-panel is-active" data-view-panel="cards">
+        <div class="rs-card-list" id="rs-card-list">
+          {% for r in rows %}
+          <article class="rs-card" data-item-id="{{ r['id'] }}" data-status="{{ r['status'] }}">
+            <div class="rs-card-head">
+              <label class="rs-card-check">
+                <input class="rs-item-check" type="checkbox" value="{{ r['id'] }}" />
+              </label>
+              <div class="rs-card-title-wrap">
+                <h3 class="rs-card-title">{{ r["name"] }}</h3>
+                <div class="rs-card-meta">SKU {{ r["sku"] or "-" }} · {{ r["condition"] or "-" }}</div>
+              </div>
+              <a class="rs-link-edit" href="/resale/{{ r['id'] }}/edit">edit</a>
+            </div>
+
+            <div class="rs-card-body">
+              <div class="rs-card-tags">{% if r["tags"] %}{{ r["tags"] }}{% else %}-{% endif %}</div>
+              {% if r["notes"] %}
+              <div class="rs-card-notes">{{ r["notes"] }}</div>
+              {% endif %}
+            </div>
+
+            <div class="rs-card-footer">
+              <div class="rs-card-status-block">
+                <span class="rs-pill rs-pill-{{ r['status']|replace(' ', '-') }}">{{ r["status"] }}</span>
+                <div class="rs-card-detail">{{ r["channel"] }}{% if r["list_price"] %} · ${{ "%.2f"|format(r["list_price"]) }}{% endif %}</div>
+              </div>
+              <div class="rs-card-detail">Qty {{ "%.2f"|format(r["qty_on_hand"]) }}</div>
+              <div class="rs-card-detail">Cost ${{ "%.2f"|format(r["unit_cost"]) }}</div>
+              <div class="rs-card-detail">Loc {{ r["location"] or "-" }}</div>
+            </div>
+
+            <form method="post" action="/resale/{{ r['id'] }}/adjust" class="rs-adjust-form">
+              <input type="number" step="1" name="delta" value="1" />
+              <button class="rs-btn rs-btn-ghost" type="submit">Apply</button>
+            </form>
+          </article>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="rs-view-panel" data-view-panel="kanban">
+        <div class="rs-kanban-message" id="rs-kanban-message" aria-live="polite"></div>
+        <div class="rs-kanban-board" id="rs-kanban-board">
+          {% for status in RESALE_STATUSES %}
+          <section class="rs-kanban-column" data-status-column="{{ status }}">
+            <header class="rs-kanban-column-head">
+              <h3>{{ status }}</h3>
+            </header>
+            <div class="rs-kanban-dropzone" data-dropzone="{{ status }}">
+              <p class="rs-empty-state">No items in this column.</p>
+              {% for r in rows if r["status"] == status %}
+              <article class="rs-kanban-card" draggable="true" data-item-id="{{ r['id'] }}" data-status="{{ r['status'] }}">
+                <div class="rs-kanban-card-title-row">
+                  <strong>{{ r["name"] }}</strong>
+                  <a class="rs-link-edit" href="/resale/{{ r['id'] }}/edit">edit</a>
+                </div>
+                <div class="rs-card-meta">SKU {{ r["sku"] or "-" }} · {{ r["condition"] or "-" }}</div>
+                <div class="rs-card-detail">Location {{ r["location"] or "-" }}</div>
+                <div class="rs-card-detail">Cost ${{ "%.2f"|format(r["unit_cost"]) }} · {{ r["channel"] }}</div>
+              </article>
+              {% endfor %}
+            </div>
+          </section>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
+
+    <section class="rs-tab-panel {{ 'is-active' if active_resale_tab == 'import' else '' }}" data-tab-panel="import" role="tabpanel" {{ 'hidden' if active_resale_tab != 'import' else '' }}>
+      <div class="rs-panel">
+        <h2>Import</h2>
+        <form method="post" action="/resale/import" enctype="multipart/form-data" class="rs-import-form">
+          <div class="rs-field">
+            <label>Import mode</label>
+            <select name="mode">
+              <option value="update">Replace tags from CSV</option>
+              <option value="append_tags" selected>Append tags from CSV</option>
+            </select>
+          </div>
+          <div class="rs-field">
+            <label>CSV file</label>
+            <input type="file" name="file" accept=".csv" required />
+          </div>
+          <div class="rs-field rs-field-action">
+            <label>&nbsp;</label>
+            <button class="rs-btn rs-btn-primary" type="submit">Import Updates</button>
+          </div>
+        </form>
+
+        <p class="rs-help-text">Blank <b>id</b> creates a new item, existing <b>id</b> updates that item, and unknown columns are ignored.</p>
+
+        {% if import_summary %}
+        <div class="rs-import-summary">
+          <h3>Import summary</h3>
+          <ul>
+            <li>Rows processed: {{ import_summary.processed }}</li>
+            <li>Created: {{ import_summary.created }}</li>
+            <li>Updated: {{ import_summary.updated }}</li>
+            <li>Skipped: {{ import_summary.skipped }}</li>
+          </ul>
+          {% if import_summary.errors %}
+          <div class="rs-import-errors">Errors</div>
+          <ul>
+            {% for err in import_summary.errors %}
+            <li>{{ err }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="rs-tab-panel {{ 'is-active' if active_resale_tab == 'bulk' else '' }}" data-tab-panel="bulk" role="tabpanel" {{ 'hidden' if active_resale_tab != 'bulk' else '' }}>
+      <form method="post" action="/resale/bulk-update" id="bulkTabForm" class="rs-panel">
+        <div class="rs-panel-head">
+          <div>
+            <h2>Bulk Edit</h2>
+            <p class="rs-help-text">Selections come from the Inventory tab. Choose items there, then apply bulk changes here or from the inline bar.</p>
+          </div>
+          <span class="rs-selection-count" id="rs-bulk-tab-count">0 selected</span>
+        </div>
+
+        <div class="rs-bulk-grid">
+          <div class="rs-field">
+            <label>Status</label>
+            {{ status_select_with_blank("status") }}
+          </div>
+          <div class="rs-field">
+            <label>Channel</label>
+            {{ channel_select_with_blank("channel") }}
+          </div>
+          <div class="rs-field">
+            <label>Location</label>
+            <input name="location" placeholder="e.g. Tote A3" />
+          </div>
+          <div class="rs-field">
+            <label>Append tags</label>
+            <input name="append_tags" placeholder="e.g. lego, starwars, hero" />
+          </div>
+          <div class="rs-field">
+            <label>Set unit cost ($ per each)</label>
+            <input type="number" step="0.01" name="unit_cost" placeholder="(no change)" />
+          </div>
+          <div class="rs-field rs-field-action">
+            <label>&nbsp;</label>
+            <button class="rs-btn rs-btn-primary" type="submit">Apply bulk changes</button>
+          </div>
+        </div>
+
+        <div class="rs-bulk-targets" data-bulk-targets></div>
+      </form>
+    </section>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-function toggleAll(master) {
-  const boxes = document.querySelectorAll('input[name="item_id"]');
-  boxes.forEach(b => b.checked = master.checked);
-}
-</script>
+(() => {
+  const tabButtons = Array.from(document.querySelectorAll("[data-tab-target]"));
+  const tabPanels = Array.from(document.querySelectorAll("[data-tab-panel]"));
+  const viewButtons = Array.from(document.querySelectorAll("[data-view-mode]"));
+  const viewPanels = Array.from(document.querySelectorAll("[data-view-panel]"));
+  const itemChecks = Array.from(document.querySelectorAll(".rs-item-check"));
+  const selectAll = document.getElementById("rs-select-all");
+  const inlineForm = document.getElementById("bulkInlineForm");
+  const inlineCount = document.getElementById("rs-bulk-inline-count");
+  const inventoryCount = document.getElementById("rs-selection-count");
+  const bulkTabCount = document.getElementById("rs-bulk-tab-count");
+  const bulkTargets = Array.from(document.querySelectorAll("[data-bulk-targets]"));
+  const kanbanMessage = document.getElementById("rs-kanban-message");
+  const cardList = document.getElementById("rs-card-list");
+  const viewStorageKey = "rs-view-mode";
+  let activeView = localStorage.getItem(viewStorageKey) || "cards";
+  const initialTab = "{{ active_resale_tab|default('inventory') }}";
 
+  function setActiveTab(tabName) {
+    tabButtons.forEach((button) => {
+      const active = button.dataset.tabTarget === tabName;
+      button.classList.toggle("is-active", active);
+      button.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    tabPanels.forEach((panel) => {
+      const active = panel.dataset.tabPanel === tabName;
+      panel.classList.toggle("is-active", active);
+      panel.hidden = !active;
+    });
+  }
+
+  function setActiveView(mode) {
+    activeView = mode === "kanban" ? "kanban" : "cards";
+    localStorage.setItem(viewStorageKey, activeView);
+    viewButtons.forEach((button) => {
+      const active = button.dataset.viewMode === activeView;
+      button.classList.toggle("is-active", active);
+    });
+    viewPanels.forEach((panel) => {
+      const active = panel.dataset.viewPanel === activeView;
+      panel.classList.toggle("is-active", active);
+    });
+    updateSelectionUi();
+  }
+
+  function selectedIds() {
+    return itemChecks.filter((input) => input.checked).map((input) => input.value);
+  }
+
+  function syncBulkTargets(ids) {
+    bulkTargets.forEach((target) => {
+      target.innerHTML = ids.map((id) => `<input type="hidden" name="item_id" value="${id}">`).join("");
+    });
+  }
+
+  function updateSelectionUi() {
+    const ids = selectedIds();
+    const count = ids.length;
+    const countText = count === 1 ? "1 selected" : `${count} selected`;
+    const canShowInline = count > 0 && activeView === "cards";
+
+    inventoryCount.textContent = countText;
+    inlineCount.textContent = countText;
+    bulkTabCount.textContent = countText;
+    inlineForm.hidden = !canShowInline;
+    cardList.classList.toggle("has-bulk-bar", canShowInline);
+    selectAll.checked = count > 0 && count === itemChecks.length;
+    syncBulkTargets(ids);
+  }
+
+  function refreshEmptyColumns() {
+    document.querySelectorAll("[data-dropzone]").forEach((zone) => {
+      const cards = zone.querySelectorAll(".rs-kanban-card");
+      const emptyState = zone.querySelector(".rs-empty-state");
+      if (!emptyState) {
+        return;
+      }
+      emptyState.hidden = cards.length > 0;
+    });
+  }
+
+  function showKanbanMessage(message, isError) {
+    kanbanMessage.textContent = message;
+    kanbanMessage.classList.toggle("is-error", Boolean(isError));
+  }
+
+  let draggedCard = null;
+  let dragOrigin = null;
+
+  document.querySelectorAll(".rs-kanban-card").forEach((card) => {
+    card.addEventListener("dragstart", (event) => {
+      draggedCard = card;
+      dragOrigin = {
+        parent: card.parentElement,
+        nextSibling: card.nextElementSibling,
+        status: card.dataset.status,
+      };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.itemId);
+      card.classList.add("is-dragging");
+    });
+
+    card.addEventListener("dragend", () => {
+      card.classList.remove("is-dragging");
+    });
+  });
+
+  document.querySelectorAll("[data-dropzone]").forEach((zone) => {
+    zone.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      zone.classList.add("is-over");
+    });
+
+    zone.addEventListener("dragleave", () => {
+      zone.classList.remove("is-over");
+    });
+
+    zone.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      zone.classList.remove("is-over");
+      if (!draggedCard) {
+        return;
+      }
+
+      const newStatus = zone.dataset.dropzone;
+      const previousParent = dragOrigin.parent;
+      const previousNextSibling = dragOrigin.nextSibling;
+      const previousStatus = dragOrigin.status;
+
+      zone.appendChild(draggedCard);
+      draggedCard.dataset.status = newStatus;
+      refreshEmptyColumns();
+      showKanbanMessage(`Updating ${draggedCard.dataset.itemId} to ${newStatus}...`, false);
+
+      try {
+        const response = await fetch(`/resale/${draggedCard.dataset.itemId}/status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus }),
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({ error: "Status update failed." }));
+          throw new Error(payload.error || "Status update failed.");
+        }
+
+        const pill = document.querySelector(`.rs-card[data-item-id="${draggedCard.dataset.itemId}"] .rs-pill`);
+        if (pill) {
+          pill.textContent = newStatus;
+          pill.className = `rs-pill rs-pill-${newStatus.replace(/ /g, "-")}`;
+        }
+        showKanbanMessage(`Item moved to ${newStatus}.`, false);
+      } catch (error) {
+        if (previousNextSibling) {
+          previousParent.insertBefore(draggedCard, previousNextSibling);
+        } else {
+          previousParent.appendChild(draggedCard);
+        }
+        draggedCard.dataset.status = previousStatus;
+        refreshEmptyColumns();
+        showKanbanMessage(error.message || "Status update failed.", true);
+      }
+    });
+  });
+
+  tabButtons.forEach((button) => {
+    button.addEventListener("click", () => setActiveTab(button.dataset.tabTarget));
+  });
+
+  viewButtons.forEach((button) => {
+    button.addEventListener("click", () => setActiveView(button.dataset.viewMode));
+  });
+
+  itemChecks.forEach((input) => {
+    input.addEventListener("change", updateSelectionUi);
+  });
+
+  selectAll.addEventListener("change", () => {
+    itemChecks.forEach((input) => {
+      input.checked = selectAll.checked;
+    });
+    updateSelectionUi();
+  });
+
+  setActiveTab(initialTab);
+  setActiveView(activeView);
+  refreshEmptyColumns();
+  updateSelectionUi();
+})();
+</script>
 {% endblock %}

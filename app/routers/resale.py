@@ -6,9 +6,9 @@ import sqlite3
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
-from ..constants import DEFAULT_CHANNEL, DEFAULT_STATUS
+from ..constants import DEFAULT_CHANNEL, DEFAULT_STATUS, RESALE_STATUSES
 from ..deps import render, get_db
 from ..utils import clean_str, safe_parse_float, normalize_code, get_next_sku, fetch_resale_rows, fetch_resale_item_by_id, upsert_resale_listing
 
@@ -22,7 +22,7 @@ router = APIRouter()
 @router.get("/resale", response_class=HTMLResponse)
 def resale_list(request: Request, q: Optional[str] = None, conn: sqlite3.Connection = Depends(get_db)):
     rows = fetch_resale_rows(conn, q=q)
-    return render("resale_list.html", request, rows=rows, q=q or "")
+    return render("resale_list.html", request, rows=rows, q=q or "", active_resale_tab="inventory")
 # =========================
 # ANCHOR: RESALE_LIST_VIEW_END
 # =========================
@@ -232,7 +232,7 @@ async def resale_import_csv(
         return render("resale_list.html", request, rows=rows, q="", import_summary={
             "processed": 0, "created": 0, "updated": 0, "skipped": 0,
             "errors": ["No headers found in CSV."],
-        })
+        }, active_resale_tab="import")
 
     with conn:
         for row_num, row in enumerate(reader, start=2):
@@ -446,7 +446,7 @@ async def resale_import_csv(
         "updated": updated,
         "skipped": skipped,
         "errors": errors,
-    })
+    }, active_resale_tab="import")
 # =========================
 # ANCHOR: RESALE_IMPORT_CSV_END
 # =========================
@@ -656,4 +656,39 @@ def resale_adjust_qty(item_id: int, delta: float = Form(...), conn: sqlite3.Conn
     return RedirectResponse(url="/resale", status_code=303)
 # =========================
 # ANCHOR: RESALE_ADJUST_QTY_END
+# =========================
+
+
+# =========================
+# ANCHOR: RESALE_STATUS_UPDATE_BEGIN
+# (Update resale listing status for kanban drag/drop)
+# =========================
+@router.post("/resale/{item_id}/status")
+async def resale_update_status(
+    item_id: int,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    try:
+        payload = await request.json()
+    except ValueError:
+        return JSONResponse({"error": "Invalid JSON body."}, status_code=400)
+
+    status = clean_str(str(payload.get("status", "")))
+    if status not in RESALE_STATUSES:
+        return JSONResponse({"error": "Invalid status value."}, status_code=400)
+
+    item = conn.execute(
+        "SELECT id FROM items WHERE id=? AND item_type='resale'",
+        (item_id,),
+    ).fetchone()
+    if not item:
+        return JSONResponse({"error": "Item not found."}, status_code=404)
+
+    with conn:
+        upsert_resale_listing(conn, item_id, status=status)
+
+    return JSONResponse({"id": item_id, "status": status}, status_code=200)
+# =========================
+# ANCHOR: RESALE_STATUS_UPDATE_END
 # =========================

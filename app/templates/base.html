@@ -17,6 +17,7 @@
     .muted { color: #666; }
     .pill { padding: 2px 8px; border: 1px solid #ccc; border-radius: 999px; font-size: 12px; display: inline-block; }
   </style>
+  {% block extra_css %}{% endblock %}
 </head>
 <body>
   <nav>
@@ -27,5 +28,6 @@
   </nav>
   <hr />
   {% block content %}{% endblock %}
+  {% block extra_js %}{% endblock %}
 </body>
 </html>

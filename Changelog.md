@@ -4,6 +4,25 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [1.10.0] — 2026-04-30
+
+### Changed — Resale Inventory UI Refresh
+
+- Added page-specific static asset support for richer resale UI work.
+- Rebuilt `/resale` into client-side tabs for Inventory, Import, and Bulk Edit without changing existing form actions.
+- Replaced the inventory table with a compact card-list default view and a kanban-by-status view persisted in `localStorage` under `rs-view-mode`.
+- Added contextual inline bulk edit controls that appear only when one or more resale items are selected.
+- Added `POST /resale/{id}/status` for kanban drag-and-drop status changes with JSON success/error responses.
+- Kept search, export, CSV import, qty adjust, and edit flows on the existing resale endpoints.
+
+### Validation
+
+- `python -m py_compile` passed for the updated FastAPI modules.
+- Jinja template compilation passed for `base.html` and `resale_list.html`.
+- Live app smoke test covered startup plus requests to `/resale` and `/static/css/resale.css`.
+
+---
+
 ## [1.9.0] — 2026-04-30
 
 ### Refactored — Extract Resale JOIN Query Helper
