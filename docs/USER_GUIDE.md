@@ -12,8 +12,35 @@ SaltStocks is a simple local inventory app for resale items (Geekery Vault / liq
 - Backups
 
 ## How to open the app
-1) Start the server (see Admin Runbook if needed)
-2) Open http://127.0.0.1:8000 in your browser
+
+### Option A — Native desktop window (recommended)
+Run this from the project directory in Terminal:
+
+```
+python3 -m app.cli window
+```
+
+SaltStocks opens in its own window — no browser tab, no address bar. Closing the window also stops the server.
+
+**First time only:** install pywebview if you haven't yet:
+```
+pip install pywebview
+```
+
+### Option B — Browser
+Run the server and open the app in your default browser automatically:
+
+```
+python3 -m app.cli serve
+```
+
+Or start the server manually and navigate to `http://127.0.0.1:8000` yourself:
+
+```
+python3 -m app.cli serve --no-browser
+```
+
+See the Admin Runbook if you need other launch options (custom port, disable reload, etc.).
 
 ## Key concepts
 

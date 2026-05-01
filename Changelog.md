@@ -4,6 +4,27 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [1.9.0] — 2026-04-30
+
+### Refactored — Extract Resale JOIN Query Helper
+
+- Added `fetch_resale_rows(conn, q=None)` to `app/utils.py` — the full `SELECT i.* … LEFT JOIN resale_listings` query, with optional search filter on name, SKU, and tags.
+- Added `fetch_resale_item_by_id(conn, item_id)` to `app/utils.py` — single-row lookup by id for the edit form.
+- Removed `_fetch_resale_rows()` private helper from `resale.py`; the `resale_list` inline duplicate is also gone.
+- `resale_export_csv` query left intact — it uses an explicit column list for CSV header alignment and is intentionally separate.
+- Unused `Dict` and `Any` typing imports removed from `resale.py`.
+
+### Added — Native Desktop Window (`python3 -m app.cli window`)
+
+- New `window` subcommand in `app/cli.py` wraps the app in a native macOS window using `pywebview` (WKWebView under the hood — no Electron, no extra runtime).
+- Uvicorn starts in a background thread; the app polls until the server is ready before opening the window.
+- Window title: **SaltStocks**, 1280×800 default, 800×600 minimum.
+- Closing the window cleanly shuts down the server.
+- Falls back gracefully with instructions if `pywebview` is not installed.
+- `pywebview==6.2.1` added to `requirements.txt`.
+
+---
+
 ## [1.8.0] — 2026-04-30
 
 ### Refactored — `clean_str()` Helper for Strip-or-None Pattern

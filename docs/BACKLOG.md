@@ -328,7 +328,7 @@ Include: **TOTAL OWED TO HOLLY**
 
 ---
 
-### [ ] pywebview — Native App Window
+### [x] pywebview — Native App Window
 
 **Goal:** Wrap the SaltStocks web UI in a native macOS window using `pywebview` so it launches and feels like a desktop app — no browser tab, no address bar, no manual navigation.
 
