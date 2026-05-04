@@ -4,6 +4,7 @@ import csv
 import io
 import sqlite3
 from typing import List, Optional
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -20,9 +21,53 @@ router = APIRouter()
 # (List and search resale inventory)
 # =========================
 @router.get("/resale", response_class=HTMLResponse)
-def resale_list(request: Request, q: Optional[str] = None, conn: sqlite3.Connection = Depends(get_db)):
-    rows = fetch_resale_rows(conn, q=q)
-    return render("resale_list.html", request, rows=rows, q=q or "", active_resale_tab="inventory")
+def resale_list(
+    request: Request,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    channel: Optional[str] = None,
+    condition: Optional[str] = None,
+    category: Optional[str] = None,
+    location: Optional[str] = None,
+    tag: Optional[str] = None,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    rows = fetch_resale_rows(conn, q=q, status=status, channel=channel,
+                             condition=condition, category=category,
+                             location=location, tag=tag)
+
+    filter_conditions = [r[0] for r in conn.execute(
+        "SELECT DISTINCT condition FROM items WHERE item_type='resale'"
+        " AND condition IS NOT NULL AND TRIM(condition) != '' ORDER BY condition"
+    ).fetchall()]
+    filter_categories = [r[0] for r in conn.execute(
+        "SELECT DISTINCT category FROM items WHERE item_type='resale'"
+        " AND category IS NOT NULL AND TRIM(category) != '' ORDER BY category"
+    ).fetchall()]
+    filter_locations = [r[0] for r in conn.execute(
+        "SELECT DISTINCT location FROM items WHERE item_type='resale'"
+        " AND location IS NOT NULL AND TRIM(location) != '' ORDER BY location"
+    ).fetchall()]
+
+    active_filter_count = sum(bool(x) for x in [status, channel, condition, category, location, tag])
+    clear_qs = urlencode({"q": q}) if q else ""
+    clear_filters_url = f"/resale?{clear_qs}" if clear_qs else "/resale"
+
+    return render(
+        "resale_list.html", request,
+        rows=rows, q=q or "", active_resale_tab="inventory",
+        filter_status=status or "",
+        filter_channel=channel or "",
+        filter_condition=condition or "",
+        filter_category=category or "",
+        filter_location=location or "",
+        filter_tag=tag or "",
+        filter_conditions=filter_conditions,
+        filter_categories=filter_categories,
+        filter_locations=filter_locations,
+        active_filter_count=active_filter_count,
+        clear_filters_url=clear_filters_url,
+    )
 # =========================
 # ANCHOR: RESALE_LIST_VIEW_END
 # =========================
