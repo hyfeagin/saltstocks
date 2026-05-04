@@ -174,13 +174,40 @@ def upsert_resale_listing(
         )
 
 
-def fetch_resale_rows(conn: sqlite3.Connection, q: Optional[str] = None) -> list:
-    """Return all resale items joined with listing data, optionally filtered by search term."""
+def fetch_resale_rows(
+    conn: sqlite3.Connection,
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+    channel: Optional[str] = None,
+    condition: Optional[str] = None,
+    category: Optional[str] = None,
+    location: Optional[str] = None,
+    tag: Optional[str] = None,
+) -> list:
+    """Return all resale items joined with listing data, optionally filtered."""
     params: Dict[str, Any] = {}
     where = "WHERE i.item_type='resale'"
     if q:
         where += " AND (i.name LIKE :q OR i.sku LIKE :q OR i.tags LIKE :q)"
         params["q"] = f"%{q}%"
+    if status:
+        where += " AND COALESCE(rl.status, 'unlisted') = :status"
+        params["status"] = status
+    if channel:
+        where += " AND COALESCE(rl.channel, 'unassigned') = :channel"
+        params["channel"] = channel
+    if condition:
+        where += " AND i.condition = :condition"
+        params["condition"] = condition
+    if category:
+        where += " AND i.category = :category"
+        params["category"] = category
+    if location:
+        where += " AND i.location = :location"
+        params["location"] = location
+    if tag:
+        where += " AND i.tags LIKE :tag"
+        params["tag"] = f"%{tag}%"
     return conn.execute(
         f"""
         SELECT

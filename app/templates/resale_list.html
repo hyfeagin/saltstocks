@@ -25,6 +25,63 @@
         <input id="resale-search" name="q" value="{{ q }}" placeholder="name, sku, tags..." />
         <button class="rs-btn rs-btn-primary" type="submit">Search</button>
       </div>
+      <div class="rs-filter-row">
+        <div class="rs-field">
+          <label for="filter-status">Status</label>
+          <select name="status" id="filter-status">
+            <option value="">All statuses</option>
+            {% for opt in RESALE_STATUSES %}
+            <option value="{{ opt }}"{{ ' selected' if filter_status == opt else '' }}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="rs-field">
+          <label for="filter-channel">Channel</label>
+          <select name="channel" id="filter-channel">
+            <option value="">All channels</option>
+            {% for opt in RESALE_CHANNELS %}
+            <option value="{{ opt }}"{{ ' selected' if filter_channel == opt else '' }}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="rs-field">
+          <label for="filter-condition">Condition</label>
+          <select name="condition" id="filter-condition">
+            <option value="">All conditions</option>
+            {% for c in filter_conditions %}
+            <option value="{{ c }}"{{ ' selected' if filter_condition == c else '' }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="rs-field">
+          <label for="filter-category">Category</label>
+          <select name="category" id="filter-category">
+            <option value="">All categories</option>
+            {% for c in filter_categories %}
+            <option value="{{ c }}"{{ ' selected' if filter_category == c else '' }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="rs-field">
+          <label for="filter-location">Location</label>
+          <select name="location" id="filter-location">
+            <option value="">All locations</option>
+            {% for l in filter_locations %}
+            <option value="{{ l }}"{{ ' selected' if filter_location == l else '' }}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="rs-field">
+          <label for="filter-tag">Tag</label>
+          <input type="text" name="tag" id="filter-tag" value="{{ filter_tag }}" placeholder="e.g. lego" />
+        </div>
+      </div>
+      {% if active_filter_count > 0 %}
+      <div class="rs-filter-meta">
+        <span class="rs-filter-badge">{{ active_filter_count }} filter{{ 's' if active_filter_count != 1 else '' }} active</span>
+        <a class="rs-filter-clear" href="{{ clear_filters_url }}">Clear filters</a>
+      </div>
+      {% endif %}
     </form>
   </section>
 

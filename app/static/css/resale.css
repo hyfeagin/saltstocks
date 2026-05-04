@@ -546,6 +546,39 @@ body {
   grid-column: 1 / -1;
 }
 
+.rs-filter-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.rs-filter-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rs-filter-badge {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--rs-accent-strong);
+  background: var(--rs-surface-deep);
+  border: 1px solid var(--rs-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+}
+
+.rs-filter-clear {
+  font-size: 0.82rem;
+  color: var(--rs-muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.rs-filter-clear:hover {
+  color: var(--rs-accent);
+}
+
 .rs-form-note {
   padding: 14px 16px;
   border-radius: 14px;
