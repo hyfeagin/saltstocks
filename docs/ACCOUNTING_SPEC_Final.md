@@ -1108,14 +1108,13 @@ The build plan is structured so that **the MVP (Phases 1–4) is fully usable wi
 | **(Phase 5+)** Anthropic API cost / latency / unreachable | Questionnaire is always available as fallback; AI failures are transparent and silent (just shows the questionnaire instead). |
 
 ### Open questions for the user
-1. Will you be the only user, or will anyone else (accountant, partner) need access?
-2. What state(s) collect sales tax from you? Single jurisdiction or multiple?
-3. Do you currently take an "owner's draw" regularly, or run payroll? (v1 assumes owner's draw only.)
-4. How far back do you want to import historical data, if at all?
-5. Do you want the year-end export to land somewhere specific (Dropbox, etc.) automatically?
-6. **Do you currently have a dedicated business bank account and/or business credit card, or is most spending on personal cards today?** This affects how prominently the personal-funds flow is featured (it's already featured heavily, but if 100% of purchases are personal, we may want to make it the default rather than a prompt).
-7. Are there any expense categories you commonly mix personal/business (e.g., a phone bill that's 80% business / 20% personal)? That's a separate flow we may want to design.
-
+1. Will you be the only user, or will anyone else (accountant, partner) need access?  Answer: I will be the only user
+2. What state(s) collect sales tax from you? Single jurisdiction or multiple? Answer: North Carolina
+3. Do you currently take an "owner's draw" regularly, or run payroll? (v1 assumes owner's draw only.) Answer: I do not run payroll this is a sole proprietor and will only take owners draw.
+4. How far back do you want to import historical data, if at all? Answer: Let's go back 1 year
+5. Do you want the year-end export to land somewhere specific (Dropbox, etc.) automatically? Answer: This should just be a downloadable file I can access in my downloads folder or other folder I specify
+6. **Do you currently have a dedicated business bank account and/or business credit card, or is most spending on personal cards today?** This affects how prominently the personal-funds flow is featured (it's already featured heavily, but if 100% of purchases are personal, we may want to make it the default rather than a prompt). Answer: I do have a dedicated business bank account but this business has not generated enough income that I regularly spend the business's own monty and it is primarily funded by owner investment 
+7. Are there any expense categories you commonly mix personal/business (e.g., a phone bill that's 80% business / 20% personal)? That's a separate flow we may want to design. Answer: Possibly gas/mileage but it's been so complex to track i've just chosen not to account for it. 
 ---
 
 ## 17. Appendix: Worked Examples
