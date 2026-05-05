@@ -1,11 +1,12 @@
 # Saltstocks Accounting Add-On — Technical Specification
 
-**Document version:** 0.3 (Draft)
+**Document version:** 0.4 (Draft)
 **Author:** Saltstocks team
 **Status:** Planning
 **Target module:** `app/accounting/`
 
 **Changelog:**
+- 0.4 — Added inbound freight (shipping-in) handling. Inbound shipping is capitalized into inventory cost and allocated across items by dollar value, per IRS / GAAP convention. New questionnaire step, allocation utility, distinction from outbound shipping clarified, worked example added.
 - 0.3 — Restructured around a **questionnaire-first MVP**. The plain-language questionnaire is now the primary entry path and is fully self-sufficient (no LLM required). The LLM is an optional enhancement layer that sits on top and translates free-text into the same questionnaire answer set. MVP ships with zero external API dependencies.
 - 0.2 — Added first-class handling of personal funds used for business expenses (Section 4 expansion, new templates, reimbursement flow, dashboard widget, "Owed Back" tracking).
 - 0.1 — Initial draft.
@@ -112,6 +113,55 @@ The business now has $800 cash. You could pay yourself back any portion of the $
 
 This conceptual separation is enforced in the UI: the dashboard shows "Owed back to you" (Contributions − Draws) as a separate, prominent number from any P&L figure.
 
+### 2.3 Background: Inbound Shipping (Freight-In) is NOT a Shipping Expense
+
+This is another concept that trips up resale businesses. The treatment depends entirely on **direction**:
+
+| Type of shipping | Where it goes in the books | When it hits the P&L |
+|---|---|---|
+| **Inbound** (wholesaler → you) | Capitalized into Inventory (added to unit cost) | Only when items sell, as part of COGS |
+| **Outbound** (you → customer) | Shipping Expense | Immediately, when paid |
+
+**Why inbound shipping is part of inventory cost:** under both GAAP and IRS rules, the cost of getting inventory ready for sale — including freight to your warehouse — is part of what that inventory cost you. Expensing it immediately overstates current-year deductions and understates inventory value, which the IRS notices in an audit.
+
+**Concrete example.** You bought $1,000 of inventory + $100 inbound shipping = $1,100 total. You sell half this year.
+
+❌ **Wrong** (expense the $100 immediately):
+```
+Dr. Inventory                      $1,000.00
+Dr. Shipping Expense               $  100.00
+    Cr. Bank/Card                          $1,100.00
+```
+This year's COGS = $500 + Shipping Expense $100 = **$600 deducted.**
+
+✅ **Right** (capitalize the $100 into inventory):
+```
+Dr. Inventory                      $1,100.00
+    Cr. Bank/Card                          $1,100.00
+```
+This year's COGS = half of $1,100 = **$550 deducted.** The other $550 stays on the books as inventory until those items sell. You eventually deduct the full $1,100 — just timed correctly.
+
+**Saltstocks always uses the right way.** When the questionnaire asks about a shipping charge on an inventory purchase, it capitalizes the cost into inventory automatically. The user never has to think about which year a deduction belongs in.
+
+### 2.4 Allocating Shipping Across Multiple Items
+
+When a single shipment contains multiple items (or multiple SKUs), the shipping cost is allocated across them so each item's per-unit cost is correct. The allocation rule:
+
+> **Each item's share of shipping = (item's pre-shipping cost ÷ shipment's pre-shipping subtotal) × shipping cost**
+
+This is the **dollar-weighted** method — items that cost more carry a proportionally larger share of the freight.
+
+**Example A — single SKU.** 12 plushies for $12.00 + $3.00 shipping.
+- All shipping goes to the plushies (single SKU): unit cost = ($12.00 + $3.00) ÷ 12 = **$1.25 each.**
+
+**Example B — multiple SKUs.** 10 plushies @ $1.00 ($10.00) + 5 keychains @ $2.00 ($10.00) + $4.00 shipping.
+- Plushies' share of shipping: ($10.00 / $20.00) × $4.00 = **$2.00** → plushie unit cost = ($10.00 + $2.00) ÷ 10 = **$1.20**
+- Keychains' share of shipping: ($10.00 / $20.00) × $4.00 = **$2.00** → keychain unit cost = ($10.00 + $2.00) ÷ 5 = **$2.40**
+
+The total inventory recorded is exactly $24.00 (the full amount paid). No money is lost in allocation.
+
+**Edge case — sales tax on the shipment.** Sales tax paid to a wholesaler on inventory purchases follows the same rule as the items themselves: it's part of inventory cost and gets allocated alongside shipping. The questionnaire treats "shipping" and "tax/other charges" as a combined "freight-and-fees" line for simplicity, then allocates the total proportionally. (For simple cases, the user can lump everything that isn't the line-item subtotal into the shipping field.)
+
 ---
 
 ## 3. Core Concept: Plain-Language Transaction Templates
@@ -181,14 +231,17 @@ User clicks **Add Entry** → picks **Answer questions** → sees this flow:
 - ☑️ Link to an existing SKU (search/dropdown)
 - (If "create new"): Brief item name + quantity
 
-**Question 7 — Receipt:** "Got a photo? Drag/drop or skip."
+**Question 7 — Inbound shipping?** *Did the wholesaler charge you anything for shipping or handling?* (number input, defaults to $0, optional)
+- *Helper text: "If yes, enter the total. We'll add it to your inventory cost so it's spread correctly across the items."*
 
-**Question 8 — Confirm:** Plain-English summary card:
-> *You bought 12 of "plushies" for $12.00 today using personal funds. The business will record this as $12.00 of inventory and will owe you $12.00 back.*
+**Question 8 — Receipt:** "Got a photo? Drag/drop or skip."
+
+**Question 9 — Confirm:** Plain-English summary card:
+> *You bought 12 of "plushies" for $12.00 + $3.00 shipping = $15.00 total today using personal funds. The business will record this as $15.00 of inventory (each plushie costs $1.25 with shipping included) and will owe you $15.00 back.*
 >
 > [← Back to edit] [✓ Looks right — record it]
 
-That's the entire questionnaire. Six to eight questions, mostly tappable. No accounting jargon. The user could answer this in 30–60 seconds on their phone.
+That's the entire questionnaire. Seven to nine questions, mostly tappable. No accounting jargon. The user could answer this in 30–60 seconds on their phone.
 
 ### 3.3 Example flow — AI mode (Phase 5+ enhancement)
 
@@ -222,7 +275,7 @@ Each template has: a unique ID, plain-English name, required fields, default acc
 | `TRAVEL_TRANSPORT` | Flight / train / Uber for business | Travel Expense | Cash / Card / Bank |
 | `OFFICE_SUPPLIES` | Office supplies | Office Supplies Expense | Cash / Card / Bank |
 | `SOFTWARE_SUBSCRIPTION` | Software subscription | Software Expense | Cash / Card / Bank |
-| `SHIPPING_OUTBOUND` | Shipping label for customer order | Shipping Expense | Cash / Card / Bank |
+| `SHIPPING_OUTBOUND` | Shipping label for customer order (you → customer) | Shipping Expense | Cash / Card / Bank |
 | `EBAY_FEES` | eBay or marketplace fees | Marketplace Fees Expense | Cash / Card / Bank |
 | `PAYMENT_PROCESSING_FEE` | Stripe/PayPal/Square fee | Payment Processing Expense | Cash / Bank |
 | `UTILITIES` | Internet, phone, electric (business %) | Utilities Expense | Cash / Card / Bank |
@@ -237,6 +290,8 @@ Each template has: a unique ID, plain-English name, required fields, default acc
 | `OTHER_INCOME` | Non-sales income (refund, rebate, etc.) | Cash / Card / Bank | Other Income |
 
 Templates are stored in code (Python module) for v1, not in the database. Adding a new template = a code change. This is fine for an internal tool.
+
+**Note on inbound shipping (freight-in):** there is intentionally no `SHIPPING_INBOUND` template. Inbound shipping is captured as an extra field on the `BUY_INVENTORY` and `BUY_INVENTORY_PERSONAL` templates and is allocated into the inventory cost itself (see §2.3 and §2.4). The user is never asked to "categorize" inbound shipping — it's just one more number on the inventory purchase form.
 
 ### 3.5 Why this approach works
 
@@ -405,6 +460,12 @@ class TransactionAnswerSet(BaseModel):
     # Inventory linkage (only for inventory templates)
     inventory_link: InventoryLink | None
     # InventoryLink = { mode: "create_new" | "link_existing", sku?: str, name?: str, quantity?: int }
+    # Multi-item shipments use a list of InventoryLink objects; see §6.2
+
+    # Inbound freight (only for BUY_INVENTORY / BUY_INVENTORY_PERSONAL)
+    freight_in_amount: Decimal | None       # Wholesaler-charged shipping; capitalized into inventory cost
+    # The total recorded inventory = sum of line-item costs + freight_in_amount.
+    # Freight is allocated across line items by dollar weight (see §2.4).
 
     # Sales tax (only for SELL_INVENTORY_CASH and similar)
     sales_tax_amount: Decimal | None
@@ -470,6 +531,15 @@ QUESTIONNAIRE_BUY_INVENTORY = [
          "Link to inventory:",
          type="inventory_picker",
          maps_to="inventory_link"),
+
+    Step("freight_in",
+         "Did the wholesaler charge you anything for shipping or handling on this order?",
+         type="number",
+         optional=True,
+         default=Decimal("0.00"),
+         help_text="If yes, enter the total. We'll add it to your inventory cost so it's allocated correctly across the items.",
+         maps_to="freight_in_amount",
+         shown_when=lambda answers: answers.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")),
 
     Step("receipt", "Got a receipt? Drag/drop or skip.",
          type="file_upload",
@@ -630,9 +700,13 @@ When a `BUY_INVENTORY` transaction is recorded, the user can either:
 
 The link is stored in `journal_lines.inventory_item_id`. This lets the existing inventory table remain the source of truth for stock levels, while accounting maintains the financial picture.
 
+**Freight-in allocation flows into inventory unit costs.** If the purchase included inbound shipping (`freight_in_amount > 0`), the posting engine allocates it across line items by dollar weight (see §8.5) **before** updating the inventory records. The inventory module sees one number per SKU: the freight-inclusive unit cost. From its perspective, freight allocation is invisible — it's just told that 12 plushies cost $1.25 each instead of $1.00 each.
+
+This is intentional: the inventory module already supports weighted-average cost updates, and feeding it freight-inclusive costs means the existing logic handles everything correctly without any new branching.
+
 When inventory is sold (via the existing eBay import flow or a manual sale entry), two journal entries are created automatically:
 1. **Sale**: Dr. Bank/Cash, Cr. Sales Revenue (and Cr. Sales Tax Payable if applicable)
-2. **COGS**: Dr. Cost of Goods Sold, Cr. Inventory — calculated using weighted average cost from the inventory tables.
+2. **COGS**: Dr. Cost of Goods Sold, Cr. Inventory — calculated using weighted average cost from the inventory tables. Because freight is already baked into unit cost, COGS automatically reflects the allocated freight without any special handling.
 
 ---
 
@@ -740,6 +814,56 @@ Entries are **never deleted**. To "delete" an entry, the system creates a revers
 ### 8.4 Period locking (v1.5)
 
 Eventually, after the user files taxes for a year, that year's entries should be locked. v1 doesn't enforce this, but the schema supports adding a `closed_periods` table later.
+
+### 8.5 Freight-in allocation
+
+Inbound shipping (§2.3, §2.4) is folded into inventory cost rather than recorded as a separate journal line. The posting engine includes a small utility for this:
+
+```python
+def allocate_freight_in(
+    line_items: list[LineItem],   # each has subtotal_cost and quantity
+    freight_amount: Decimal
+) -> list[LineItem]:
+    """
+    Distribute freight_amount across line items by dollar weight.
+    Returns line items with adjusted total_cost (subtotal + freight share).
+    Per-unit cost is then total_cost / quantity.
+    """
+    if freight_amount == Decimal("0"):
+        return line_items
+
+    subtotal = sum(li.subtotal_cost for li in line_items)
+    if subtotal == Decimal("0"):
+        # Edge case: free items with paid shipping. Distribute by quantity instead.
+        total_qty = sum(li.quantity for li in line_items)
+        for li in line_items:
+            li.total_cost = freight_amount * (li.quantity / total_qty)
+        return line_items
+
+    # Normal case: dollar-weighted allocation
+    allocated_so_far = Decimal("0")
+    for i, li in enumerate(line_items):
+        if i == len(line_items) - 1:
+            # Last item gets the remainder, to ensure the sum is exact
+            li.total_cost = li.subtotal_cost + (freight_amount - allocated_so_far)
+        else:
+            share = (li.subtotal_cost / subtotal * freight_amount).quantize(Decimal("0.01"))
+            li.total_cost = li.subtotal_cost + share
+            allocated_so_far += share
+
+    return line_items
+```
+
+**Penny-rounding rule:** the last item absorbs any rounding remainder so the total exactly equals `subtotal + freight_amount`. No money goes missing.
+
+The resulting journal entry is the same shape as a normal inventory purchase — just a single `Inventory` debit equal to the post-allocation total:
+
+```
+Dr. 1200 Inventory                 $15.00     (= $12 items + $3 freight)
+    Cr. 3100 Owner Contributions           $15.00
+```
+
+The allocation appears in the **inventory** records (each SKU's unit cost reflects its share of freight), not in additional journal lines. This keeps the books clean and the COGS-on-sale logic unchanged.
 
 ---
 
@@ -1048,10 +1172,11 @@ The build plan is structured so that **the MVP (Phases 1–4) is fully usable wi
 - Build the questionnaire engine: step definitions, branching, server-driven flow.
 - Build questionnaire UI: per-step Jinja2 partials, big tappable buttons, mobile-friendly.
 - Wire all v1 templates (BUY_INVENTORY, BUY_INVENTORY_PERSONAL, BUY_EXPENSE_PERSONAL, REIMBURSE_OWNER, all expense templates, etc.) to questionnaire flows.
-- Confirm screen with plain-English summary.
+- **Freight-in handling:** questionnaire step + allocation utility + multi-line inventory support on the inventory step.
+- Confirm screen with plain-English summary (including freight-allocated unit cost shown clearly).
 - Replace the manual form from Phase 1 as the user-facing entry path.
 
-**Exit criteria:** user can record any v1 transaction by clicking through the questionnaire — no developer help needed, no AI needed.
+**Exit criteria:** user can record any v1 transaction by clicking through the questionnaire — including multi-SKU inventory purchases with inbound shipping — no developer help needed, no AI needed.
 
 ### Phase 3 — Reports (1 week)
 - P&L, Balance Sheet, Expense by Category.
@@ -1115,6 +1240,8 @@ The build plan is structured so that **the MVP (Phases 1–4) is fully usable wi
 5. Do you want the year-end export to land somewhere specific (Dropbox, etc.) automatically? Answer: This should just be a downloadable file I can access in my downloads folder or other folder I specify
 6. **Do you currently have a dedicated business bank account and/or business credit card, or is most spending on personal cards today?** This affects how prominently the personal-funds flow is featured (it's already featured heavily, but if 100% of purchases are personal, we may want to make it the default rather than a prompt). Answer: I do have a dedicated business bank account but this business has not generated enough income that I regularly spend the business's own monty and it is primarily funded by owner investment 
 7. Are there any expense categories you commonly mix personal/business (e.g., a phone bill that's 80% business / 20% personal)? That's a separate flow we may want to design. Answer: Possibly gas/mileage but it's been so complex to track i've just chosen not to account for it. 
+8. **For wholesaler invoices: do they typically itemize shipping as a separate line, or is it sometimes bundled into the per-unit price?** If sometimes bundled, the questionnaire's freight field is just $0 in those cases — no special handling needed. But if you frequently get invoices with separate handling fees, fuel surcharges, etc., we may want to support a few line items in the freight field rather than one combined number. Answer: Shipping is usually itemized
+
 ---
 
 ## 17. Appendix: Worked Examples
@@ -1208,6 +1335,76 @@ Dr. 6020 Travel                    $60.00
 **Dashboard impact:** "Owed back to you" goes up by $60.00. The hotel still hits the P&L as a Travel expense (lowering net income for tax purposes), AND the business now owes you $60 to reimburse.
 
 This is the answer to the original question: **the system tracks both things separately and automatically.** The expense gets recognized for taxes (Travel), and your reimbursement ledger goes up (Owner Contributions). When the business pays you back, that's a separate Owner Draw entry — it doesn't double-count anything.
+
+### Example H — Inbound shipping on an inventory purchase, single SKU
+
+User answers in questionnaire:
+- *What kind?* → Bought inventory
+- *Whose money?* → Personal funds
+- *Cost?* → $12.00
+- *When?* → Today
+- *Vendor?* → "Plushie Wholesale Co."
+- *Inventory link?* → Create new SKU, "plushies", quantity 12
+- *Inbound shipping?* → **$3.00**
+
+**Allocation:** $3.00 entirely to the plushies (single SKU). Per-unit cost = ($12.00 + $3.00) ÷ 12 = **$1.25 each.**
+
+**Journal entry:**
+```
+Dr. 1200 Inventory                 $15.00
+    Cr. 3100 Owner Contributions           $15.00
+```
+
+**Inventory side-effect:** new SKU "plushies", qty=12, unit_cost=**$1.25**.
+**Dashboard impact:** "Owed back to you" goes up by **$15.00** (not $12 — they paid $15 of personal money for it).
+
+**Plain-English summary on Confirm screen:**
+> *You bought 12 of "plushies" for $12.00 + $3.00 shipping = $15.00 total today using personal funds. The business will record this as $15.00 of inventory (each plushie costs $1.25 with shipping included) and will owe you $15.00 back.*
+
+### Example I — Inbound shipping on an inventory purchase, MULTIPLE SKUs
+
+User bought a mixed shipment from a wholesaler:
+- 10 plushies @ $1.00 = $10.00
+- 5 keychains @ $2.00 = $10.00
+- Subtotal: $20.00
+- Shipping: $4.00
+- **Total paid: $24.00 on personal card**
+
+Questionnaire flow lets the user add multiple inventory lines on the inventory step (a "+ Add another item" button). User enters both lines, then $4.00 in the shipping field.
+
+**Allocation:**
+- Plushies' share: ($10.00 / $20.00) × $4.00 = $2.00 → unit cost = ($10.00 + $2.00) ÷ 10 = **$1.20 each**
+- Keychains' share: ($10.00 / $20.00) × $4.00 = $2.00 → unit cost = ($10.00 + $2.00) ÷ 5 = **$2.40 each**
+
+**Journal entry (single combined entry, the $4 freight is invisible in the books):**
+```
+Dr. 1200 Inventory                 $24.00
+    Cr. 3100 Owner Contributions           $24.00
+```
+
+**Inventory side-effects:**
+- "plushies" SKU, qty=10, unit_cost=$1.20
+- "keychains" SKU, qty=5, unit_cost=$2.40
+
+**Dashboard impact:** "Owed back to you" goes up by **$24.00**.
+
+### Example J — Sale of an item that had freight allocated
+
+Six months later, user sells one of the plushies from Example H for $5.00 cash, paid into the business bank.
+
+**Sale entry:**
+```
+Dr. 1020 Bank                      $5.00
+    Cr. 4000 Sales Revenue                 $5.00
+```
+
+**Auto-COGS entry** (uses the freight-inclusive unit cost):
+```
+Dr. 5000 Cost of Goods Sold        $1.25
+    Cr. 1200 Inventory                     $1.25
+```
+
+Note that COGS is **$1.25, not $1.00.** The 25¢ of freight is now flowing through the P&L exactly as the IRS expects — when the related item sells, not in the year it was purchased. No special logic was needed at sale time; the inventory module just used the unit cost it had on file.
 
 ---
 
