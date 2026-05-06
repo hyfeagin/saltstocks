@@ -1,11 +1,12 @@
 # Saltstocks Accounting Add-On — Technical Specification
 
-**Document version:** 0.4 (Draft)
+**Document version:** 0.5 (Draft)
 **Author:** Saltstocks team
 **Status:** Planning
 **Target module:** `app/accounting/`
 
 **Changelog:**
+- 0.5 — Added comprehensive UI Design System documentation (Section 14) extracted from Claude Design export: salt-marsh palette, typography (Fraunces/Inter/JetBrains Mono), spacing scale, canonical card recipe, component library, interaction states, iconography (Lucide), content voice guidelines, and responsive behavior. Added complete Implementation To-Do List (Section 19) with checkboxes tracking Phase 1 progress.
 - 0.4 — Added inbound freight (shipping-in) handling. Inbound shipping is capitalized into inventory cost and allocated across items by dollar value, per IRS / GAAP convention. New questionnaire step, allocation utility, distinction from outbound shipping clarified, worked example added.
 - 0.3 — Restructured around a **questionnaire-first MVP**. The plain-language questionnaire is now the primary entry path and is fully self-sufficient (no LLM required). The LLM is an optional enhancement layer that sits on top and translates free-text into the same questionnaire answer set. MVP ships with zero external API dependencies.
 - 0.2 — Added first-class handling of personal funds used for business expenses (Section 4 expansion, new templates, reimbursement flow, dashboard widget, "Owed Back" tracking).
@@ -1152,6 +1153,464 @@ Wave can export transaction data as CSV. A future utility could parse the export
 
 ---
 
+## 14. UI Design System
+
+This section documents the **SaltStocks Design System** — the visual language, design tokens, and component patterns that unified the app's interface. The design was created in Claude Design and is being integrated into the accounting module alongside the existing resale inventory interface.
+
+### 14.1 Design Philosophy
+
+**Voice:** Operator-first, calm, plainspoken. No marketing copy, no exclamation points. Help text reads like a friend explaining a workflow over a desk.
+
+**Visual identity:** The "salt-marsh palette" — a quiet, herbal green that reads as "calm spreadsheet" rather than "consumer SaaS." The brand is text-and-token-first, with no photography, illustration, or pattern fill.
+
+**Key principles:**
+- **Local-first, founder-run tool** — designed for someone running their own machine, wearing all the hats
+- **One column at a time** — even complex screens stack vertically; multi-column only appears inside cards
+- **Quiet interactions** — no bouncing, no springs, no glass effects; 220ms ease for all state changes
+- **Text and data over decoration** — status communicated by named pills, not icons; buttons are text-only except where an icon truly replaces a label
+
+### 14.2 Color Palette
+
+The salt-marsh palette is defined via CSS custom properties in `colors_and_type.css`. All colors use the `--ss-*` prefix.
+
+#### Surfaces & backgrounds
+- **Body background:** `#f4faf8` with a soft radial highlight (`rgba(47,143,115,0.08)` at top-right) and vertical gradient `#f8fcfa → #eef6f2`
+- **Primary surface (cards):** `#ffffff` white
+- **Secondary surface (tinted):** `#edf7f3`
+- **Deep emphasis:** `#dff0e8` (used in pills, SKU chips, highlighted panels)
+- **Input fields:** `#fcfffd` (barely perceptible tint over white)
+
+#### Borders
+- **Standard:** `#c7ddd3` (1px solid) for resting cards and inputs
+- **Strong:** `#8eb9a7` for buttons, bulk-edit frames, emphasized containers
+- **Dashed:** `#c7ddd3` for empty-state placeholders
+
+#### Text (ink)
+- **Primary:** `#18322d` (near-black with green undertone)
+- **Muted/help text:** `#5e7d73`
+- **Accent:** `#2f8f73` (the resale-green — primary buttons, focus rings, active tabs)
+- **Accent strong:** `#236d57` (headings within cards, primary links)
+
+#### Semantic colors
+- **Accent soft (12% alpha):** `rgba(47,143,115,0.12)` — active tab background
+- **Accent glow (18% alpha):** `rgba(47,143,115,0.18)` — focus ring
+- **Warning:** `#8c6d1f` text on `rgba(140,109,31,0.08)` background (warm sand tone)
+- **Danger:** `#8b3f49` (used for "trashed"/"donated" pills, import errors)
+- **Success:** uses `--ss-accent` (the green)
+- **Info:** `#356f61`
+
+#### Status pill colors (resale lexicon)
+Each status has a paired background (alpha-tinted) and foreground (solid):
+- **Listed:** `rgba(47,143,115,0.15)` bg / `#236d57` fg
+- **Unlisted:** `rgba(94,125,115,0.12)` bg / `#5e7d73` fg
+- **Sold:** `rgba(47,143,115,0.08)` bg / `#356f61` fg
+- **Donated/Trashed:** `rgba(139,63,73,0.10)` bg / `#8b3f49` fg
+
+### 14.3 Typography
+
+**Font families:**
+- **Display (Fraunces, 600):** Page H1s only. Serif with personality. `-0.03em` letter-spacing.
+- **UI (Inter, 400/500/600/700):** Everything else. Clean, readable, professional.
+- **Monospace (JetBrains Mono, 400/500):** SKUs, codes, tag lists, anything copy-pasteable. `ui-monospace` fallback.
+
+**Type scale (16px base):**
+- **Display:** `2.5rem` (40px) — marketing/hero only
+- **H1:** `2rem` (32px) — page titles
+- **H2:** `1.5rem` (24px) — card section headers
+- **H3:** `1.1rem` (17.6px) — list-card titles
+- **Body:** `1rem` (16px) — default
+- **Help text:** `0.92rem` (14.7px) — muted color
+- **Label:** `0.82rem` (13.1px) — field labels, weight 600, muted color, sentence case
+- **Pill:** `0.82rem` (13.1px) — status pills
+- **Tiny meta (eyebrow):** `0.78rem` (12.5px) — weight 700, letter-spacing `0.08em`, **UPPERCASE** (the only uppercase text in the system)
+
+**Line heights:**
+- **Tight:** `1.1` (headings)
+- **Snug:** `1.3` (H2/H3)
+- **Body:** `1.5` (paragraph text)
+
+**Special typography features:**
+- **SKU chip:** monospace on `--ss-surface-deep` pill background, `0.9rem` size, weight 500, `0.01em` tracking
+- **Font feature settings:** `'cv11', 'ss01'` enabled globally for Inter (slightly more geometric)
+
+### 14.4 Spacing & Layout
+
+**Spacing scale (4px-derived):**
+```
+--ss-s-1:  4px
+--ss-s-2:  6px
+--ss-s-3:  8px
+--ss-s-4:  10px
+--ss-s-5:  12px
+--ss-s-6:  14px
+--ss-s-7:  16px
+--ss-s-8:  18px
+--ss-s-9:  22px
+--ss-s-10: 24px
+--ss-s-12: 32px
+--ss-s-16: 48px
+```
+
+**Layout constraints:**
+- **Page max-width:** `1380px` (resale list)
+- **Form max-width:** `1120px` (forms, settings)
+- **Narrow max-width:** `720px` (single-column content)
+- **Mobile breakpoint:** `<960px` — everything collapses to single column
+
+**Card padding:** 16–22px (varies by content density)
+**Field grid gaps:** 12–14px
+
+### 14.5 Border Radius & Shadows
+
+**Radii:**
+- **Input fields:** `12px`
+- **Inline panels/notes:** `14px`
+- **Primary cards:** `18px` (`--ss-r-card`) — **this is the system signature**
+- **Pills:** `999px` (buttons, status pills, filter badges, view-mode toggles)
+
+**Shadows:**
+- **Primary card shadow:** `0 12px 24px rgba(24,50,45,0.08)` — soft, low-contrast, deep-green-tinted
+- **Kanban card shadow:** `0 8px 16px rgba(24,50,45,0.06)` — smaller variant
+- **Focus ring:** `0 0 0 2px rgba(47,143,115,0.18)` — 2px outline, not a shadow
+- **No inner shadows** anywhere in the system
+
+**Border + shadow pairing:** Cards always carry **both** a 1px border and the soft shadow. The border holds shape on the gradient background; the shadow lifts it. Removing either flattens the surface.
+
+### 14.6 Component Library
+
+#### Buttons
+
+**Primary button:**
+```css
+background: var(--ss-accent);
+color: white;
+border: none;
+border-radius: var(--ss-r-pill);
+padding: 10px 20px;
+font-weight: 600;
+transition: background var(--ss-dur-base) var(--ss-ease);
+
+/* Hover */
+background: var(--ss-accent-strong);
+
+/* Active/pressed */
+transform: translateY(1px);
+```
+
+**Ghost/secondary button:**
+```css
+background: transparent;
+color: var(--ss-accent-strong);
+border: 1px solid var(--ss-border);
+border-radius: var(--ss-r-pill);
+
+/* Hover */
+background: var(--ss-surface-alt);
+```
+
+**Danger button:**
+```css
+background: var(--ss-danger);
+color: white;
+/* Same structure as primary */
+```
+
+#### Status pills
+```css
+display: inline-flex;
+align-items: center;
+padding: 4px 12px;
+border-radius: var(--ss-r-pill);
+font-size: var(--ss-fs-pill);
+font-weight: 500;
+letter-spacing: var(--ss-tracking-pill);
+text-transform: lowercase;
+
+/* Example: listed */
+background: var(--ss-status-listed-bg);
+color: var(--ss-status-listed-fg);
+```
+
+#### Cards
+
+**Canonical card recipe (the foundation of the entire system):**
+```css
+background: var(--ss-surface);
+border: 1px solid var(--ss-border);
+border-radius: var(--ss-r-card);
+box-shadow: var(--ss-shadow-card);
+padding: 16px–22px;
+```
+
+**Variants:**
+- **Tinted card:** `background: var(--ss-surface-alt);` (secondary surfaces)
+- **Kanban card:** smaller shadow `var(--ss-shadow-kanban)`, `cursor: grab`, drag state `opacity: 0.55`
+
+#### Form inputs
+
+```css
+background: var(--ss-surface-input);
+border: 1px solid var(--ss-border);
+border-radius: var(--ss-r-input);
+padding: 10px 14px;
+font-family: var(--ss-font-sans);
+font-size: var(--ss-fs-body);
+color: var(--ss-text);
+
+/* Focus */
+outline: 2px solid var(--ss-accent-glow);
+border-color: var(--ss-accent);
+
+/* Disabled */
+background: var(--ss-surface-alt);
+color: var(--ss-muted);
+cursor: not-allowed;
+```
+
+**Help text below input:**
+```css
+font-size: var(--ss-fs-help);
+color: var(--ss-muted);
+margin-top: 6px;
+```
+
+#### Tabs / view toggles
+
+**Active tab:**
+```css
+background: var(--ss-accent-soft); /* 12% alpha pill */
+color: var(--ss-accent-strong);
+border-radius: var(--ss-r-pill);
+padding: 8px 16px;
+font-weight: 600;
+```
+
+**Inactive tab:**
+```css
+background: transparent;
+color: var(--ss-muted);
+/* Same structure, no background */
+```
+
+#### Empty states
+
+```css
+border: 2px dashed var(--ss-border-dashed);
+border-radius: var(--ss-r-panel);
+padding: var(--ss-s-12);
+text-align: center;
+color: var(--ss-muted);
+
+/* Text */
+"No items in this column." (neutral, never cheerful)
+```
+
+#### Banners / notes
+
+**Info banner:**
+```css
+background: var(--ss-warn-soft);
+border: 1px solid var(--ss-warn);
+border-radius: var(--ss-r-panel);
+padding: 12px 16px;
+color: var(--ss-warn);
+```
+
+**Error banner:**
+```css
+background: var(--ss-danger-soft);
+border: 1px solid var(--ss-danger);
+/* Same structure */
+```
+
+#### Navigation (top bar)
+
+```css
+position: fixed;
+top: 0;
+left: 0;
+right: 0;
+background: var(--ss-surface);
+border-bottom: 1px solid var(--ss-border);
+padding: 12px 24px;
+z-index: 100;
+
+/* Logo at 24px */
+/* Nav links: accent-strong, weight 600, no underline */
+/* Active: slightly darker, no other visual change */
+```
+
+### 14.7 Interaction States
+
+**Hover:**
+- **Buttons:** Primary darkens to `--ss-accent-strong`; ghost gains `--ss-surface-alt` fill
+- **Links:** Primary links (accent-strong, weight 600) gain underline only if they're inline help-text links; nav links rely on color alone
+- **Kanban cards:** `cursor: grab`
+
+**Active/pressed:**
+- **Buttons:** `transform: translateY(1px)` — 1px inset translation
+- **No click-ripple effects**
+
+**Focus:**
+- **Inputs:** `outline: 2px solid var(--ss-accent-glow)` + border tightens to `--ss-accent`
+- **Buttons:** same outline treatment
+- **No drop shadows on focus** — outline only
+
+**Dragging (Kanban):**
+- **Card being dragged:** `opacity: 0.55`
+- **Drop zone hovered:** `background: var(--ss-accent-soft)` (8% alpha fill)
+
+**Loading:**
+- **Inline text only:** `"Updating GV-FUNKO-000001 to listed..."` — no spinners, no skeleton screens
+- Page navigation is full reload (no SPA shell)
+
+### 14.8 Animation & Motion
+
+**Timing:**
+- **Fast:** `140ms` (icon state changes)
+- **Base:** `220ms` (all other transitions — buttons, panels, state changes)
+- **Easing:** `cubic-bezier(0.4, 0.0, 0.2, 1)` (Material Design "standard" — smooth deceleration)
+
+**What animates:**
+- Bulk-edit bar collapse: `opacity 0.22s ease, transform 0.22s ease` with 10px Y-translate
+- Button hover: `background 220ms ease`
+- Focus rings: instant (no transition)
+- **No bouncing, no springs, no micro-interactions**
+
+**What doesn't animate:**
+- Page transitions (full reload)
+- Card appearance (instant)
+- Modal overlays (not present in system — everything is inline)
+
+### 14.9 Iconography
+
+**Icon set:** [Lucide](https://lucide.dev)
+- **Style:** Stroke-based, 1.5px stroke, 24×24 viewbox
+- **Color:** Inherits from text color; accent green only for active state on icon-only nav buttons
+- **Usage rule:** An icon must replace, not decorate, a label
+- **Acceptable:** Tab-bar icons, hamburger menu on mobile, drag handles on Kanban cards
+- **Unacceptable:** Random decoration on stat cards, icons next to every form label
+
+**Logo:**
+- **File:** `assets/saltstocks-logo.svg`
+- **Style:** Custom monoline salt-crystal mark (stacked-cube isometric)
+- **Usage:** 24px in top nav, 64px on dashboard hero, tinted `--ss-accent-strong`
+
+**Emoji policy:** None in product UI. (Roadmap in GitHub README uses ✅/🚧 — that's documentation, not product.)
+
+**Unicode separators:** `→` and `·` used as text separators, not as iconography.
+
+### 14.10 Content Voice & Lexicon
+
+**Writing rules:**
+- **Second person, imperative for instructions:** "Use the **Backup Now** button" / "Set the date range."
+- **Lowercase sentence case** for buttons, headers, table headers. Title Case reserved for brand name "SaltStocks" and page H1s.
+- **Short sentences. One idea per line.**
+- **Plain English over jargon:** "Backups are stored in `data/backups/`" — not "persistent snapshots."
+- **No emoji in UI.** No exclamation points.
+- **Code voice for code things:** File paths, env vars, SKU formats, shell commands always in `code spans`.
+
+**Status lexicon (do not paraphrase):**
+- Statuses: `unlisted`, `listed`, `sold`, `donated`, `trashed`
+- Channels: `ebay`, `etsy`, `direct` (lowercase, configurable)
+- Match states (eBay import): `matched`, `unmatched`, `already imported`, `clamped`
+
+**Empty/zero states:**
+- "No items in this column." (neutral)
+- "No unmatched line items in this preview." (factual)
+- Never: "Looks like you're all caught up! 🎉"
+
+**Errors:**
+- "Missing required fields: `client_id`, `client_secret`." (factual)
+- "eBay auth codes expire after ~5 minutes." (helpful)
+
+**Numbers and money:**
+- Currency: `$` prefix, two decimals: `$12.50`
+- Quantities: two decimals (`1.00`) for Umivera fractional qty support
+- SKUs: uppercase, hyphenated, zero-padded: `GV-FUNKO-000001`
+
+### 14.11 Page Layouts
+
+The design system defines layouts for the five primary app surfaces. Each uses the unified salt-marsh tokens.
+
+#### Dashboard
+- **Hero section:** Logo (64px), H1 "SaltStocks", stat cards in grid (3 columns → 1 column mobile)
+- **Quick actions:** "Backup Now" button, "Add Entry" button
+- **Recent entries widget:** Last 10 entries, table format
+- **"Owed back to you" widget:** Big number, detail link, "Reimburse myself" button (accounting-specific)
+
+#### Resale Inventory List
+- **Search shell:** Card with input, filters, status dropdown
+- **Tabs shell:** Card with tabs (Card / Kanban / Bulk Edit / Import)
+- **Tab panels:** Each panel in own card
+- **Card view:** Grid of item cards (`repeat(auto-fill, minmax(280px, 1fr))`)
+- **Kanban view:** 5 fixed columns (unlisted / listed / sold / donated / trashed)
+
+#### Add/Edit Resale Item Form
+- **Single card shell** with form grid (3 columns → 1 column mobile)
+- **SKU display:** Read-only SKU chip at top
+- **Field groupings:** Visual separation with subtle borders, no heavy section headers
+- **Action buttons:** Bottom-right, "Save" primary + "Cancel" ghost
+
+#### Configurator (Settings)
+- **Tabbed sections:** Categories / Brand Codes / eBay Credentials
+- **Table + form pattern:** Existing items in table, "Add new" form below
+- **Danger zone:** Separate card at bottom for destructive actions (if any)
+
+#### eBay Import
+- **Date range picker** at top
+- **Preview mode:** Table of matched/unmatched line items with status pills
+- **Apply mode:** Confirmation summary, "Apply deductions" primary button
+- **Idempotent indicator:** "Already imported" status shown clearly
+
+#### Accounting (new surface, to be built per this spec)
+Follows the same patterns:
+- **Questionnaire steps:** One card per step, big tappable buttons for multi-choice
+- **Confirm screen:** Summary card with plain-English description
+- **Entry list:** Table in card, same structure as resale list
+- **Reports:** HTML table in card + "Download CSV" button
+
+### 14.12 Responsive Behavior
+
+**Breakpoint:** `960px`
+
+**Above 960px (desktop):**
+- Multi-column grids active (form: 3 col, bulk: auto-fit, Kanban: 5 col)
+- Top nav horizontal
+- Search + filters side-by-side
+
+**Below 960px (mobile):**
+- **Everything single column**
+- Form grid collapses
+- Kanban scrolls horizontally (5 columns preserved, container scrolls)
+- Top nav: hamburger menu (not yet implemented — use simple stacked nav)
+- Touch targets: minimum 44px tap area
+- Card padding reduces to 16px
+
+**No tablet-specific breakpoint** — just desktop and mobile.
+
+### 14.13 Implementation Notes
+
+**CSS architecture:**
+- All tokens defined in `colors_and_type.css` (or promoted into `app/static/css/resale.css`)
+- Current `base.html` 24-line default stylesheet should be **retired** — replace with salt-marsh tokens globally
+- Jinja2 templates can reference classes like `.ss-card`, `.ss-btn-primary`, `.ss-pill-listed`
+
+**Component reuse:**
+- The card recipe is the foundation — search shell, tabs shell, panels, forms, list items all use it
+- Status pills are data-driven — template macro takes `status` string, applies correct `--ss-status-{status}-bg/fg`
+- Buttons styled via utility classes (`.ss-btn-primary`, `.ss-btn-ghost`, `.ss-btn-danger`)
+
+**Asset integration:**
+- Logo SVG at `app/static/assets/saltstocks-logo.svg`
+- Lucide icons loaded via CDN: `<script src="https://unpkg.com/lucide@latest"></script>`
+
+**Font loading:**
+- Google Fonts import in CSS: `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap');`
+- System font fallback if fonts fail to load
+
+---
+
 ## 15. Phased Build Plan
 
 The build plan is structured so that **the MVP (Phases 1–4) is fully usable without any AI**. The user can replace Wave entirely after Phase 4. AI is added as a Phase 5+ enhancement that doesn't change anything underneath it.
@@ -1170,13 +1629,14 @@ The build plan is structured so that **the MVP (Phases 1–4) is fully usable wi
 ### Phase 2 — Questionnaire (1–2 weeks) — THE CORE MVP FEATURE
 - Define `TransactionAnswerSet` schema (the canonical contract).
 - Build the questionnaire engine: step definitions, branching, server-driven flow.
-- Build questionnaire UI: per-step Jinja2 partials, big tappable buttons, mobile-friendly.
+- Build questionnaire UI: per-step Jinja2 partials, **big tappable buttons** (see §14.6 Component Library), mobile-friendly.
+- **Apply the SaltStocks design system** (§14) to all accounting templates — use the salt-marsh palette tokens, canonical card recipe, status pills, and typography scale.
 - Wire all v1 templates (BUY_INVENTORY, BUY_INVENTORY_PERSONAL, BUY_EXPENSE_PERSONAL, REIMBURSE_OWNER, all expense templates, etc.) to questionnaire flows.
 - **Freight-in handling:** questionnaire step + allocation utility + multi-line inventory support on the inventory step.
 - Confirm screen with plain-English summary (including freight-allocated unit cost shown clearly).
 - Replace the manual form from Phase 1 as the user-facing entry path.
 
-**Exit criteria:** user can record any v1 transaction by clicking through the questionnaire — including multi-SKU inventory purchases with inbound shipping — no developer help needed, no AI needed.
+**Exit criteria:** user can record any v1 transaction by clicking through the questionnaire, including multi-SKU inventory purchases with inbound shipping. The accounting UI is visually unified with the rest of Saltstocks.
 
 ### Phase 3 — Reports (1 week)
 - P&L, Balance Sheet, Expense by Category.
@@ -1219,7 +1679,7 @@ The build plan is structured so that **the MVP (Phases 1–4) is fully usable wi
 
 ---
 
-## 16. Risks & Open Questions
+## 17. Risks & Open Questions
 
 | Risk | Mitigation |
 |---|---|
@@ -1233,18 +1693,18 @@ The build plan is structured so that **the MVP (Phases 1–4) is fully usable wi
 | **(Phase 5+)** Anthropic API cost / latency / unreachable | Questionnaire is always available as fallback; AI failures are transparent and silent (just shows the questionnaire instead). |
 
 ### Open questions for the user
-1. Will you be the only user, or will anyone else (accountant, partner) need access?  Answer: I will be the only user
-2. What state(s) collect sales tax from you? Single jurisdiction or multiple? Answer: North Carolina
-3. Do you currently take an "owner's draw" regularly, or run payroll? (v1 assumes owner's draw only.) Answer: I do not run payroll this is a sole proprietor and will only take owners draw.
-4. How far back do you want to import historical data, if at all? Answer: Let's go back 1 year
-5. Do you want the year-end export to land somewhere specific (Dropbox, etc.) automatically? Answer: This should just be a downloadable file I can access in my downloads folder or other folder I specify
-6. **Do you currently have a dedicated business bank account and/or business credit card, or is most spending on personal cards today?** This affects how prominently the personal-funds flow is featured (it's already featured heavily, but if 100% of purchases are personal, we may want to make it the default rather than a prompt). Answer: I do have a dedicated business bank account but this business has not generated enough income that I regularly spend the business's own monty and it is primarily funded by owner investment 
-7. Are there any expense categories you commonly mix personal/business (e.g., a phone bill that's 80% business / 20% personal)? That's a separate flow we may want to design. Answer: Possibly gas/mileage but it's been so complex to track i've just chosen not to account for it. 
-8. **For wholesaler invoices: do they typically itemize shipping as a separate line, or is it sometimes bundled into the per-unit price?** If sometimes bundled, the questionnaire's freight field is just $0 in those cases — no special handling needed. But if you frequently get invoices with separate handling fees, fuel surcharges, etc., we may want to support a few line items in the freight field rather than one combined number. Answer: Shipping is usually itemized
+1. Will you be the only user, or will anyone else (accountant, partner) need access?
+2. What state(s) collect sales tax from you? Single jurisdiction or multiple?
+3. Do you currently take an "owner's draw" regularly, or run payroll? (v1 assumes owner's draw only.)
+4. How far back do you want to import historical data, if at all?
+5. Do you want the year-end export to land somewhere specific (Dropbox, etc.) automatically?
+6. **Do you currently have a dedicated business bank account and/or business credit card, or is most spending on personal cards today?** This affects how prominently the personal-funds flow is featured (it's already featured heavily, but if 100% of purchases are personal, we may want to make it the default rather than a prompt).
+7. Are there any expense categories you commonly mix personal/business (e.g., a phone bill that's 80% business / 20% personal)? That's a separate flow we may want to design.
+8. **For wholesaler invoices: do they typically itemize shipping as a separate line, or is it sometimes bundled into the per-unit price?** If sometimes bundled, the questionnaire's freight field is just $0 in those cases — no special handling needed. But if you frequently get invoices with separate handling fees, fuel surcharges, etc., we may want to support a few line items in the freight field rather than one combined number.
 
 ---
 
-## 17. Appendix: Worked Examples
+## 18. Appendix: Worked Examples
 
 ### Example A — "I bought 12 plushies for inventory today for $12, paid Chase card"
 
@@ -1409,3 +1869,175 @@ Note that COGS is **$1.25, not $1.00.** The 25¢ of freight is now flowing throu
 ---
 
 *End of specification.*
+
+---
+
+## 19. Implementation To-Do List
+
+Check items off as they are completed. Items are ordered so each one can be done independently in a single session. Pick up at the first unchecked item after any interruption.
+
+---
+
+### Phase 1 — Foundation
+
+**Module scaffold**
+- [x] Create `app/accounting/` directory with `__init__.py`
+- [x] Create `app/accounting/models.py` — Python dataclass or namedtuple definitions for `Account`, `JournalEntry`, `JournalLine`, `Receipt`, `SalesTaxRate` (used internally; tables defined in migrate)
+- [x] Create `app/accounting/exceptions.py` — `UnbalancedEntryError`, `EmptyEntryError`, `VoidedEntryError`
+
+**Database migrations**
+- [x] Add `accounts` table to `app/migrate.py` with all columns from §6.1; seed the full default chart of accounts on first run
+- [x] Add `journal_entries` table to `app/migrate.py`
+- [ ] Add `journal_lines` table to `app/migrate.py` with CHECK constraint (debit XOR credit)
+- [ ] Add `receipts` table to `app/migrate.py`
+- [ ] Add `sales_tax_rates` table to `app/migrate.py`; seed North Carolina rate
+
+**Posting engine**
+- [ ] Create `app/accounting/posting.py` — `post_entry(conn, answer_set)`: validates balance (Decimal, debits == credits), writes `journal_entries` + `journal_lines` atomically, raises on imbalance or zero
+- [ ] Add `void_entry(conn, entry_id, reason)` to `posting.py` — writes a reversing entry, marks both rows `is_void=True`
+- [ ] Add `allocate_freight_in(line_items, freight_amount)` utility to `posting.py` — dollar-weighted allocation, last item absorbs rounding remainder (see §8.5)
+
+**Template catalog**
+- [ ] Create `app/accounting/catalog.py` — define all ~24 templates from §3.4 as Python dicts/dataclasses: `id`, `name`, `debit_account_code`, `credit_account_code`, `required_fields`
+
+**Router & nav**
+- [ ] Create `app/accounting/routes.py` — FastAPI `APIRouter`, register in `app/main.py` with prefix `/accounting`
+- [ ] Add "Accounting" link to `app/templates/base.html` nav
+
+**Chart of accounts UI**
+- [ ] `GET /accounting/accounts` — list all accounts, grouped by type; HTML table
+- [ ] `POST /accounting/accounts` — add a custom account (name, type, subtype)
+- [ ] `POST /accounting/accounts/{id}` — rename or toggle `is_active`; block delete on `is_system_protected` accounts
+
+**Manual entry form (developer harness — replaced in Phase 2)**
+- [ ] `GET /accounting/entry/manual` — form: template dropdown, date, amount, vendor, memo, optional payment account
+- [ ] `POST /accounting/entry/manual` — validates, calls `post_entry()`, redirects to entry list
+- [ ] Create `app/templates/accounting/entry_manual.html`
+
+**Entry list & detail**
+- [ ] `GET /accounting/entries` — table: date, template, vendor, amount, void status; filters: date range, template
+- [ ] `GET /accounting/entries/{id}` — detail: journal lines (account name, debit, credit), receipt thumbnails, void button
+- [ ] Create `app/templates/accounting/entry_list.html` and `entry_detail.html`
+
+**Receipt storage**
+- [ ] `POST /accounting/entries/{id}/receipts` — accept file upload, compute SHA-256, store under `data/receipts/YYYY/MM/{uuid}.ext`, insert `receipts` row
+- [ ] `GET /accounting/receipts/{id}/file` — stream file from disk
+
+**Exit criteria checkpoint:** can record any transaction manually, see it in the list with journal lines, and attach a receipt.
+
+---
+
+### Phase 2 — Questionnaire (Core MVP)
+
+**Canonical schema**
+- [ ] Create `app/accounting/schemas.py` — `TransactionAnswerSet` Pydantic model (all fields from §5.1), `InventoryLink` model, `LineItem` model (for multi-SKU purchases)
+
+**Questionnaire engine**
+- [ ] Create `app/accounting/questionnaire.py` — `Step` class (id, question, input_type, options, maps_to, shown_when, optional, default, help_text); `QuestionnaireSession` that holds partial answer-set and current step
+- [ ] Add session storage for in-progress questionnaires (SQLite `questionnaire_sessions` table OR server-side dict keyed by session token — SQLite preferred for persistence)
+- [ ] `GET /accounting/entry/start` — creates session, returns first step (transaction type picker)
+- [ ] `POST /accounting/entry/answer` — body: `{session_id, step_id, answer}`; advances session, returns next step or `{done: true, answer_set: ...}`
+- [ ] `POST /accounting/entry/preview` — body: completed answer-set; calls template engine to produce proposed `JournalEntry` with lines + plain-English summary string; does NOT write to DB
+- [ ] `POST /accounting/entry/confirm` — body: confirmed answer-set + receipt files; calls `post_entry()` atomically, stores receipts, redirects to entry detail
+
+**Questionnaire UI templates**
+- [ ] Create `app/templates/accounting/questionnaire_step.html` — shell with progress indicator ("Step N of ~M"), Back button, renders the current step partial
+- [ ] Create step partial: `_step_multi_choice.html` — big tappable buttons (see §14.6 for button styling)
+- [ ] Create step partial: `_step_number.html` — number input with optional help text
+- [ ] Create step partial: `_step_date.html` — date picker with Today / Yesterday quick buttons
+- [ ] Create step partial: `_step_text.html` — free-text input, optional flag
+- [ ] Create step partial: `_step_account_picker.html` — dropdown filtered by subtype
+- [ ] Create step partial: `_step_inventory_picker.html` — "create new" vs "link existing SKU" with search; "+ Add another item" button for multi-SKU purchases
+- [ ] Create step partial: `_step_file_upload.html` — drag/drop or skip
+- [ ] Create `app/templates/accounting/entry_confirm.html` — plain-English summary card (use canonical card recipe from §14.6), Edit / Record It buttons
+
+**Apply design system**
+- [ ] Import `colors_and_type.css` tokens into `app/static/css/` (or merge into existing `resale.css`)
+- [ ] Apply salt-marsh palette to all accounting templates — use `--ss-*` CSS variables throughout
+- [ ] Use canonical card recipe (§14.6) for all shells (search, tabs, panels, forms)
+- [ ] Use status pill pattern for any status display
+- [ ] Apply typography scale — H1s use Fraunces display font, body uses Inter
+- [ ] Ensure all buttons use pill radius (`--ss-r-pill`) and appropriate variants (primary/ghost/danger)
+
+**Wire templates to questionnaire flows**
+- [ ] Wire `BUY_INVENTORY` — business funds inventory purchase (questions: type → amount → date → vendor → payment account → inventory link → freight-in → receipt)
+- [ ] Wire `BUY_INVENTORY_PERSONAL` — personal funds inventory purchase (same flow, skips payment account, credit = Owner Contributions)
+- [ ] Wire `BUY_EXPENSE_PERSONAL` — personal funds business expense (questions: type → expense category → amount → date → vendor → receipt)
+- [ ] Wire `REIMBURSE_OWNER` — business pays owner back (questions: amount ≤ current balance → source bank account → date → memo)
+- [ ] Wire `SELL_INVENTORY_CASH` + auto `COGS_RECOGNITION` — manual sale entry (deferred; most sales come from eBay import)
+- [ ] Wire expense templates: `BUSINESS_MEAL`, `TRAVEL_HOTEL`, `TRAVEL_TRANSPORT`, `OFFICE_SUPPLIES`, `SOFTWARE_SUBSCRIPTION`, `SHIPPING_OUTBOUND`, `EBAY_FEES`, `PAYMENT_PROCESSING_FEE`, `UTILITIES`, `RENT`, `PROFESSIONAL_SERVICES`, `BANK_FEE`
+- [ ] Wire `OWNER_CONTRIBUTION`, `OWNER_DRAW`, `PAY_CREDIT_CARD`, `SALES_TAX_REMITTED`, `OTHER_EXPENSE`, `OTHER_INCOME`
+
+**Freight-in**
+- [ ] Add freight-in step to `BUY_INVENTORY` and `BUY_INVENTORY_PERSONAL` flows — shown after inventory link step; calls `allocate_freight_in()` before posting; updates per-unit cost on each inventory line
+- [ ] Show freight-allocated unit cost on Confirm screen summary ("each plushie costs $1.25 with shipping included")
+
+**Replace manual form**
+- [ ] Update "Add Entry" button to link to `/accounting/entry/start` (questionnaire) instead of manual form; keep `/accounting/entry/manual` accessible for dev/admin use
+
+**Exit criteria checkpoint:** user can record any v1 transaction by clicking through the questionnaire, including multi-SKU inventory purchases with inbound shipping. The accounting UI is visually unified with the rest of Saltstocks.
+
+---
+
+### Phase 3 — Reports
+
+- [ ] Create `app/accounting/reports.py` — SQL queries for P&L, Balance Sheet, Expense by Category, General Ledger
+- [ ] `GET /accounting/reports/pnl?from=&to=` — HTML report + "Download CSV" button; format matches §11.1
+- [ ] `GET /accounting/reports/balance-sheet?asof=` — HTML + CSV; §11.2
+- [ ] `GET /accounting/reports/expenses-by-category?from=&to=` — HTML table + CSV; §11.3
+- [ ] `GET /accounting/reports/ledger/{account_id}?from=&to=` — chronological entry list with running balance; §11.5
+- [ ] `GET /accounting/reports/year-end-export/{year}` — ZIP bundle: P&L CSV, Expense CSV, General Ledger CSV, all receipts organized by month, SQLite snapshot; §11.6
+- [ ] Add Reports nav section to accounting area (links to each report)
+- [ ] Apply design system to all report templates (canonical card for report container, table styling)
+
+**Exit criteria checkpoint:** can produce tax-ready CSV outputs from questionnaire-entered data.
+
+---
+
+### Phase 4 — Sales Tax, Receipt Vault, Dashboard Widget
+
+**Sales tax**
+- [ ] Sales tax rates admin UI — `GET/POST /accounting/settings/sales-tax`; add/edit jurisdictions and rates; default = North Carolina
+- [ ] Add sales tax step to `SELL_INVENTORY_CASH` questionnaire flow (taxable? yes/no → amount or auto-calc from rate)
+- [ ] `GET /accounting/reports/sales-tax?from=&to=` — collected, remitted, net liability; §10.3
+- [ ] Wire `SALES_TAX_REMITTED` to clear Sales Tax Payable balance
+
+**Inventory linkage on buy**
+- [ ] On `BUY_INVENTORY` / `BUY_INVENTORY_PERSONAL` confirm: if "create new SKU" → call existing `get_next_sku()` and insert into `items` table; if "link existing" → increment `qty_on_hand` and update `unit_cost` (weighted average)
+
+**Auto-COGS on eBay import**
+- [ ] Hook into `app/routers/ebay.py` `ebay_import_run` apply path — after each `UPDATE items SET qty_on_hand=...`, post a `COGS_RECOGNITION` journal entry: Dr. COGS / Cr. Inventory, amount = qty_sold × unit_cost
+
+**Receipt vault browse**
+- [ ] `GET /accounting/receipts` — thumbnail grid (or icon list for non-images), filters: date range, has-receipt vs missing-receipt, template; click → entry detail; §9.2
+
+**"Owed back to you" widget**
+- [ ] Add widget to main dashboard (`app/templates/dashboard.html`) — queries Owner Contributions balance − Owner Draws balance; shows big number + "Reimburse myself" link
+- [ ] `GET /accounting/owner-balance` — detail page: two columns (contributions list, draws list), running totals, "Reimburse myself" button that pre-fills `REIMBURSE_OWNER` questionnaire with full balance
+
+**Backup extension**
+- [ ] Extend `app/routers/dashboard.py` `backup_now()` — after copying the SQLite file, also `shutil.copytree` `data/receipts/` into the backup archive
+
+**Exit criteria checkpoint: Wave can be turned off.** Full accounting system operational without AI.
+
+---
+
+### Phase 5 — AI Enhancement (Optional, Post-MVP)
+
+- [ ] Create `app/accounting/nlp.py` — Anthropic API call: sends user text + template catalog + account list, receives partial `TransactionAnswerSet` JSON with per-field confidence scores
+- [ ] Add "Talk to AI" option on entry chooser screen (`GET /accounting/entry/start`) — shown only when AI mode is enabled in settings
+- [ ] `POST /accounting/entry/parse` — body: `{description}`; calls `nlp.py`, validates output, returns partial answer-set + list of remaining low-confidence questionnaire steps
+- [ ] Hand-off: any field with confidence < 0.7 or missing → injects corresponding questionnaire step before Confirm screen
+- [ ] Add AI mode enable/disable setting to accounting settings page
+- [ ] Fallback: if Anthropic API unreachable, show notice and open questionnaire directly
+
+---
+
+### Phase 6 — Quality of Life (Ongoing)
+
+- [ ] "Quick repeat" — clone an existing entry as a questionnaire starting point
+- [ ] Recurring entry templates — rent and subscriptions auto-post on a schedule
+- [ ] Period locking — add `closed_periods` table; block new entries in locked years
+- [ ] Wave CSV import utility — parse Wave export, create journal entries for each row
+- [ ] Mixed personal/business expense splits — e.g., 80/20 phone bill split across expense + personal draw
+- [ ] Mileage/gas tracking — simplified mileage log with IRS rate auto-calculation

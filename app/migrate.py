@@ -235,6 +235,93 @@ def migrate():
         except sqlite3.IntegrityError:
             pass
 
+        # ── Accounting: Chart of Accounts ─────────────────────────────────────
+        if not table_exists(conn, "accounts"):
+            conn.execute("""
+            CREATE TABLE accounts (
+              id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+              code                   TEXT NOT NULL UNIQUE,
+              name                   TEXT NOT NULL,
+              type                   TEXT NOT NULL
+                CHECK (type IN ('asset','liability','equity','income','expense')),
+              subtype                TEXT,
+              is_active              INTEGER NOT NULL DEFAULT 1,
+              is_personal_funds_proxy INTEGER NOT NULL DEFAULT 0,
+              is_system_protected    INTEGER NOT NULL DEFAULT 0,
+              created_at             TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_accounts_active ON accounts(is_active)")
+
+        # Seed default chart of accounts (skip if any rows exist)
+        if conn.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 0:
+            # (code, name, type, subtype, is_personal_funds_proxy, is_system_protected)
+            accounts_seed = [
+                ("1010", "Cash on Hand",               "asset",     "cash",         0, 0),
+                ("1020", "Bank — Primary Checking",    "asset",     "bank",         0, 0),
+                ("1030", "Bank — Business Savings",    "asset",     "bank",         0, 0),
+                ("1200", "Inventory",                  "asset",     "inventory",    0, 1),
+                ("1500", "Receipt Vault Holding",      "asset",     "clearing",     0, 0),
+                ("2010", "Credit Card — Primary",      "liability", "credit_card",  0, 0),
+                ("2100", "Sales Tax Payable",          "liability", "tax",          0, 1),
+                ("3000", "Owner's Equity",             "equity",    None,           0, 0),
+                ("3100", "Owner Contributions",        "equity",    None,           1, 1),
+                ("3200", "Owner Draws",                "equity",    None,           0, 1),
+                ("4000", "Sales Revenue",              "income",    None,           0, 0),
+                ("4100", "Other Income",               "income",    None,           0, 0),
+                ("5000", "Cost of Goods Sold",         "expense",   "cogs",         0, 1),
+                ("6010", "Meals & Entertainment",      "expense",   None,           0, 0),
+                ("6020", "Travel",                     "expense",   None,           0, 0),
+                ("6030", "Office Supplies",            "expense",   None,           0, 0),
+                ("6040", "Software & Subscriptions",   "expense",   None,           0, 0),
+                ("6050", "Shipping",                   "expense",   None,           0, 0),
+                ("6060", "Marketplace Fees",           "expense",   None,           0, 0),
+                ("6070", "Payment Processing Fees",    "expense",   None,           0, 0),
+                ("6080", "Utilities",                  "expense",   None,           0, 0),
+                ("6090", "Rent",                       "expense",   None,           0, 0),
+                ("6100", "Professional Services",      "expense",   None,           0, 0),
+                ("6110", "Bank Fees",                  "expense",   None,           0, 0),
+                ("6900", "Other Expenses",             "expense",   None,           0, 0),
+            ]
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO accounts
+                  (code, name, type, subtype, is_personal_funds_proxy, is_system_protected)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                accounts_seed,
+            )
+
+        # ── Accounting: Journal Entries ───────────────────────────────────────
+        if not table_exists(conn, "journal_entries"):
+            conn.execute("""
+            CREATE TABLE journal_entries (
+              id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+              entry_date         TEXT NOT NULL,
+              description        TEXT NOT NULL,
+              template_id        TEXT NOT NULL,
+              total_amount       TEXT NOT NULL,
+              created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+              created_by_method  TEXT NOT NULL DEFAULT 'questionnaire'
+                CHECK (created_by_method IN ('questionnaire','manual','import_ebay','system_auto')),
+              vendor             TEXT,
+              notes              TEXT,
+              is_void            INTEGER NOT NULL DEFAULT 0,
+              void_reason        TEXT,
+              void_at            TEXT
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_entries_date ON journal_entries(entry_date)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_entries_template ON journal_entries(template_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_entries_void ON journal_entries(is_void)"
+            )
+
         # Backfill company default for existing rows:
         # resale -> GV, material -> UM (reasonable default)
         conn.execute("""
