@@ -179,6 +179,10 @@
   align-items: flex-end;
 }
 
+.ac-report-shell {
+  margin-bottom: 16px;
+}
+
 .ac-filter-field {
   display: grid;
   gap: 4px;
@@ -188,6 +192,13 @@
 .ac-filter-field select {
   width: auto;
   min-width: 130px;
+}
+
+.ac-filter-actions {
+  display: flex;
+  gap: 8px;
+  align-self: flex-end;
+  flex-wrap: wrap;
 }
 
 /* ── Amount — right-aligned, bold ────────────────────────────────────── */
@@ -202,4 +213,235 @@
   color: var(--ss-muted);
   font-size: var(--ss-fs-help);
   padding: 8px 0;
+}
+
+/* ── Reports nav ─────────────────────────────────────────────────────── */
+.ac-reports-nav {
+  padding: 18px 20px;
+  margin-bottom: 16px;
+}
+
+.ac-reports-nav-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.ac-reports-links {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ac-report-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-r-pill);
+  background: var(--ss-surface-alt);
+  color: var(--ss-accent-strong);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ac-report-link:hover {
+  border-color: var(--ss-accent);
+  background: var(--ss-accent-soft);
+  color: var(--ss-accent-strong);
+}
+
+/* ── Report layout + canonical report cards/tables ──────────────────── */
+.ac-report-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.ac-report-meta {
+  color: var(--ss-muted);
+  margin-top: 4px;
+}
+
+.ac-report-card {
+  padding: 0;
+  overflow: hidden;
+}
+
+.ac-report-table th,
+.ac-report-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-report-table th:last-child,
+.ac-report-table td:last-child {
+  text-align: right;
+  width: 160px;
+}
+
+.ac-report-table .ac-report-num {
+  text-align: right;
+}
+
+.ac-report-table .ac-report-pad-left {
+  padding-left: 20px;
+}
+
+.ac-report-table .ac-report-pad-right {
+  padding-right: 20px;
+}
+
+.ac-col-code,
+.ac-col-date {
+  width: 110px;
+}
+
+.ac-col-entry {
+  width: 80px;
+}
+
+.ac-col-template {
+  width: 170px;
+}
+
+.ac-report-subhead td {
+  padding-top: 16px;
+  font-size: var(--ss-fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: var(--ss-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ss-muted);
+  border-bottom: none;
+}
+
+.ac-report-total td {
+  font-weight: 700;
+}
+
+.ac-report-emphasis td {
+  font-weight: 700;
+  font-size: 1rem;
+  border-top: 2px solid var(--ss-border);
+}
+
+.ac-ledger-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ac-ledger-card {
+  padding: 18px 20px;
+}
+
+.ac-ledger-card .ac-detail-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.ac-entry-link {
+  color: var(--ss-accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.ac-muted-cell {
+  color: var(--ss-muted);
+}
+
+.ac-ledger-table th:nth-last-child(-n+3),
+.ac-ledger-table td:nth-last-child(-n+3) {
+  text-align: right;
+  width: 130px;
+}
+
+.ac-receipts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.ac-receipt-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+}
+
+.ac-receipt-preview {
+  height: 180px;
+  background: var(--ss-surface-alt);
+  border-bottom: 1px solid var(--ss-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ac-receipt-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ac-receipt-icon {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--ss-accent-strong);
+}
+
+.ac-receipt-body {
+  padding: 16px 18px 18px;
+}
+
+.ac-receipt-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.ac-receipt-desc {
+  font-size: var(--ss-fs-body);
+  color: var(--ss-text);
+  margin: 0 0 8px;
+}
+
+.ac-receipt-subtext {
+  font-size: var(--ss-fs-help);
+  color: var(--ss-muted);
+  margin: 0;
+}
+
+.ac-owner-balance-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ac-owner-balance-amount {
+  font-size: 2.25rem;
+  line-height: 1;
+  font-weight: 700;
+  margin: 8px 0 12px;
+}
+
+.ac-owner-balance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.ac-owner-balance-card {
+  padding: 18px 20px;
+}
+
+@media (max-width: 760px) {
+  .ac-owner-balance-grid {
+    grid-template-columns: 1fr;
+  }
 }

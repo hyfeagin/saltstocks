@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>Sales Tax Settings</h1>
+      <div class="ac-detail-value ac-report-meta">
+        Manage jurisdictions, rates, and which jurisdiction is used as the default.
+      </div>
+    </div>
+    <a href="/accounting/accounts" class="rs-btn rs-btn-ghost">← Accounts</a>
+  </div>
+
+  {% if saved %}
+  <div class="ac-banner ac-banner-success">
+    <b>Saved.</b> Sales tax settings were updated.
+  </div>
+  {% endif %}
+  {% if error %}
+  <div class="ac-banner ac-banner-error">
+    <b>Error:</b> {{ error }}
+  </div>
+  {% endif %}
+
+  {% include "accounting/_reports_nav.html" %}
+
+  <div class="rs-card rs-form-shell" style="margin-bottom: 20px; padding: 20px 22px;">
+    <h3 class="ac-section-title">Add Jurisdiction</h3>
+    <form method="post" action="/accounting/settings/sales-tax">
+      <input type="hidden" name="action" value="add" />
+      <div class="rs-form-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+        <div class="rs-field">
+          <label>Jurisdiction</label>
+          <input name="jurisdiction" placeholder="North Carolina" required />
+        </div>
+        <div class="rs-field">
+          <label>Rate (%)</label>
+          <input type="number" name="rate_percent" step="0.01" min="0" placeholder="4.75" required />
+        </div>
+        <div class="rs-field">
+          <label>Effective From</label>
+          <input type="date" name="effective_from" required />
+        </div>
+        <div class="rs-field">
+          <label>Effective To <span class="ac-muted-cell">(optional)</span></label>
+          <input type="date" name="effective_to" />
+        </div>
+      </div>
+      <label style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+        <input type="checkbox" name="is_default" value="1" />
+        <span>Set as default jurisdiction</span>
+      </label>
+      <div class="ac-form-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Add Jurisdiction</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="rs-card ac-report-card">
+    {% if rates %}
+    <table class="ac-report-table">
+      <thead>
+        <tr>
+          <th class="ac-report-pad-left">Jurisdiction</th>
+          <th>Rate</th>
+          <th>Effective From</th>
+          <th>Effective To</th>
+          <th>Default</th>
+          <th class="ac-report-pad-right"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for rate in rates %}
+        {% set form_id = "sales-tax-rate-" ~ rate.id %}
+        <tr>
+          <td class="ac-report-pad-left">
+            <input form="{{ form_id }}" name="jurisdiction" value="{{ rate.jurisdiction }}" required />
+          </td>
+          <td>
+            <input form="{{ form_id }}" type="number" name="rate_percent" step="0.01" min="0" value="{{ rate.rate_percent }}" required />
+          </td>
+          <td>
+            <input form="{{ form_id }}" type="date" name="effective_from" value="{{ rate.effective_from }}" required />
+          </td>
+          <td>
+            <input form="{{ form_id }}" type="date" name="effective_to" value="{{ rate.effective_to }}" />
+          </td>
+          <td>
+            <label style="display:flex; justify-content:center;">
+              <input form="{{ form_id }}" type="checkbox" name="is_default" value="1" {{ 'checked' if rate.is_default else '' }} />
+            </label>
+          </td>
+          <td class="ac-report-pad-right">
+            <div style="display:flex; justify-content:flex-end; gap:10px; align-items:center;">
+              {% if rate.is_default %}
+              <span class="ac-pill ac-pill-posted">Default</span>
+              {% endif %}
+              <button form="{{ form_id }}" class="rs-btn rs-btn-ghost rs-btn-sm" type="submit">Save</button>
+            </div>
+            <form id="{{ form_id }}" method="post" action="/accounting/settings/sales-tax">
+              <input type="hidden" name="action" value="update" />
+              <input type="hidden" name="rate_id" value="{{ rate.id }}" />
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="ac-empty" style="padding: 20px;">
+      No sales tax jurisdictions have been added yet.
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

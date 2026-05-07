@@ -6,6 +6,7 @@ from decimal import Decimal
 from app.accounting.catalog import resolve_lines
 from app.accounting.questionnaire import QuestionnaireSession, next_visible_step, record_answer
 from app.accounting.routes import _account_filter_for_step
+from app.accounting.reports import general_ledger
 from app.db import get_conn
 
 
@@ -83,6 +84,50 @@ class MiscAccountingTemplateFlowTests(unittest.TestCase):
             _account_filter_for_step("payment_account_id", {"template_id": "OTHER_INCOME"}),
             "bank,credit_card,cash",
         )
+
+    def test_sales_tax_remitted_clears_sales_tax_payable_balance(self) -> None:
+        conn = get_conn()
+        try:
+            account_map = {
+                row["code"]: row["id"]
+                for row in conn.execute("SELECT id, code FROM accounts").fetchall()
+            }
+
+            sale_lines = resolve_lines(
+                template_id="SELL_INVENTORY_CASH",
+                total_amount=Decimal("27.50"),
+                account_map=account_map,
+                payment_account_id=account_map["1020"],
+                sales_tax_amount=Decimal("2.50"),
+            )
+            remittance_lines = resolve_lines(
+                template_id="SALES_TAX_REMITTED",
+                total_amount=Decimal("2.50"),
+                account_map=account_map,
+                payment_account_id=account_map["1020"],
+            )
+
+            sales_tax_account_id = account_map["2100"]
+            self.assertEqual(
+                [(line.account_id, line.debit, line.credit) for line in sale_lines if line.account_id == sales_tax_account_id],
+                [(sales_tax_account_id, Decimal("0"), Decimal("2.50"))],
+            )
+            self.assertEqual(
+                [(line.account_id, line.debit, line.credit) for line in remittance_lines if line.account_id == sales_tax_account_id],
+                [(sales_tax_account_id, Decimal("2.50"), Decimal("0"))],
+            )
+
+            report = general_ledger(conn, account_id=sales_tax_account_id)
+            opening = report["closing_balance"]
+            self.assertGreaterEqual(opening, Decimal("0"))
+            simulated_closing = (
+                opening
+                + Decimal("2.50")  # sale credit increases liability
+                - Decimal("2.50")  # remittance debit clears it back out
+            ).quantize(Decimal("0.01"))
+            self.assertEqual(simulated_closing, opening)
+        finally:
+            conn.close()
 
 
 if __name__ == "__main__":

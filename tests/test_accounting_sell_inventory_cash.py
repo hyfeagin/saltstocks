@@ -8,7 +8,7 @@ from decimal import Decimal
 from app.accounting.catalog import resolve_lines
 from app.accounting.posting import JournalLineInput, PostEntryRequest, post_entries
 from app.accounting.questionnaire import QuestionnaireSession, next_visible_step, record_answer
-from app.accounting.routes import _resolve_sale_inventory_context
+from app.accounting.routes import _normalize_sales_tax_answers, _resolve_sale_inventory_context
 
 
 def _sale_conn() -> sqlite3.Connection:
@@ -28,6 +28,14 @@ def _sale_conn() -> sqlite3.Connection:
           id INTEGER PRIMARY KEY,
           code TEXT NOT NULL UNIQUE,
           name TEXT NOT NULL
+        );
+        CREATE TABLE sales_tax_rates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          jurisdiction TEXT NOT NULL,
+          rate TEXT NOT NULL,
+          is_default INTEGER NOT NULL DEFAULT 0,
+          effective_from TEXT NOT NULL,
+          effective_to TEXT
         );
         CREATE TABLE journal_entries (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +63,7 @@ def _sale_conn() -> sqlite3.Connection:
 
 
 class SellInventoryCashFlowTests(unittest.TestCase):
-    def test_questionnaire_prompts_for_sold_inventory_item(self) -> None:
+    def test_questionnaire_prompts_for_sales_tax_branch(self) -> None:
         session = QuestionnaireSession()
 
         record_answer(session, "template_id", "SELL_INVENTORY_CASH")
@@ -67,6 +75,63 @@ class SellInventoryCashFlowTests(unittest.TestCase):
             {"mode": "link_existing", "item_id": 1, "quantity": 1},
         )
         self.assertEqual(next_visible_step(session).id, "total_amount")
+
+        record_answer(session, "total_amount", "10.00")
+        record_answer(session, "entry_date", "2026-05-06")
+        record_answer(session, "vendor", "Buyer")
+        record_answer(session, "payment_account_id", "1")
+        self.assertEqual(next_visible_step(session).id, "sales_tax_applies")
+
+        record_answer(session, "sales_tax_applies", "yes")
+        self.assertEqual(next_visible_step(session).id, "sales_tax_mode")
+
+        record_answer(session, "sales_tax_mode", "auto")
+        self.assertEqual(next_visible_step(session).id, "memo")
+
+    def test_tax_exempt_sale_skips_tax_amount_in_answer_set(self) -> None:
+        session = QuestionnaireSession()
+
+        record_answer(session, "template_id", "SELL_INVENTORY_CASH")
+        record_answer(
+            session,
+            "inventory_link_sale",
+            {"mode": "link_existing", "item_id": 1, "quantity": 1},
+        )
+        record_answer(session, "total_amount", "10.00")
+        record_answer(session, "entry_date", "2026-05-06")
+        record_answer(session, "vendor", "Buyer")
+        record_answer(session, "payment_account_id", "1")
+        record_answer(session, "sales_tax_applies", "no")
+
+        conn = _sale_conn()
+        try:
+            answer_dict = _normalize_sales_tax_answers(conn=conn, answer_dict=session.answers.copy())
+            self.assertEqual(answer_dict["sales_tax_amount"], Decimal("0"))
+            self.assertIsNone(answer_dict["sales_tax_jurisdiction_id"])
+        finally:
+            conn.close()
+
+    def test_auto_sales_tax_uses_default_rate_and_backs_out_tax_from_total(self) -> None:
+        conn = _sale_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO sales_tax_rates (jurisdiction, rate, is_default, effective_from)
+                VALUES ('North Carolina', '0.0475', 1, '2024-01-01')
+                """
+            )
+            answer_dict = {
+                "template_id": "SELL_INVENTORY_CASH",
+                "total_amount": Decimal("10.48"),
+                "sales_tax_applies": "yes",
+                "sales_tax_mode": "auto",
+            }
+
+            normalized = _normalize_sales_tax_answers(conn, answer_dict)
+            self.assertEqual(normalized["sales_tax_amount"], Decimal("0.48"))
+            self.assertEqual(normalized["sales_tax_jurisdiction_id"], 1)
+        finally:
+            conn.close()
 
     def test_resolve_sale_inventory_context_validates_existing_stock(self) -> None:
         conn = _sale_conn()

@@ -5,6 +5,7 @@ import json
 import sqlite3
 import uuid
 from io import StringIO
+from io import BytesIO
 from dataclasses import asdict, replace
 from datetime import date as date_type, datetime
 from decimal import Decimal, InvalidOperation
@@ -12,11 +13,13 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 import csv
+import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 
 from app.deps import BASE_DIR, get_db, render
+from app.db import DB_PATH
 from app.accounting.catalog import CATALOG, get_template, resolve_lines
 from app.accounting.exceptions import EmptyEntryError, UnbalancedEntryError, VoidedEntryError
 from app.accounting.posting import (
@@ -37,8 +40,16 @@ from app.accounting.questionnaire import (
     record_answer,
     step_progress,
 )
-from app.accounting.reports import balance_sheet, profit_and_loss
+from app.accounting.reports import (
+    balance_sheet,
+    expenses_by_category,
+    general_ledger,
+    profit_and_loss,
+    receipt_index,
+    sales_tax_summary,
+)
 from app.accounting.schemas import TransactionAnswerSet
+from app.utils import get_next_sku
 
 router = APIRouter()
 
@@ -59,6 +70,9 @@ _PAYMENT_ACCOUNT_FILTER_BY_TEMPLATE = {
     "PAY_CREDIT_CARD": "bank",
     "SALES_TAX_REMITTED": "bank",
 }
+
+_DEFAULT_NEW_RESALE_COMPANY = "GV"
+_DEFAULT_NEW_RESALE_CODE = "MISC"
 
 
 def _csv_response(filename: str, rows: list[list[object]]) -> Response:
@@ -122,6 +136,149 @@ def _balance_sheet_csv_rows(report: dict) -> list[list[object]]:
     return rows
 
 
+def _expenses_by_category_csv_rows(report: dict) -> list[list[object]]:
+    rows: list[list[object]] = [
+        ["Expenses by Category"],
+        ["From", report["from_date"]],
+        ["To", report["to_date"]],
+        [],
+        ["Account Code", "Category", "Amount"],
+    ]
+    for line in report["categories"]:
+        rows.append([line.account_code, line.account_name, f"{line.amount:.2f}"])
+    rows.append(["", "Total Expenses", f"{report['total_expenses']:.2f}"])
+    return rows
+
+
+def _sales_tax_csv_rows(report: dict) -> list[list[object]]:
+    return [
+        ["Sales Tax Summary"],
+        ["From", report["from_date"]],
+        ["To", report["to_date"]],
+        [],
+        ["Metric", "Amount"],
+        ["Collected", f"{report['collected']:.2f}"],
+        ["Remitted", f"{report['remitted']:.2f}"],
+        ["Net Liability", f"{report['net_liability']:.2f}"],
+    ]
+
+
+def _ledger_csv_rows(report: dict) -> list[list[object]]:
+    rows: list[list[object]] = [
+        ["General Ledger / Account Activity"],
+        ["Account", f"{report['account_code']} - {report['account_name']}"],
+        ["From", report["from_date"] or ""],
+        ["To", report["to_date"] or ""],
+        ["Opening Balance", f"{report['opening_balance']:.2f}"],
+        [],
+        ["Date", "Entry ID", "Template", "Description", "Memo", "Debit", "Credit", "Running Balance"],
+    ]
+    for line in report["lines"]:
+        rows.append(
+            [
+                line.entry_date,
+                line.entry_id,
+                line.template_id,
+                line.description,
+                line.memo or "",
+                f"{line.debit:.2f}",
+                f"{line.credit:.2f}",
+                f"{line.running_balance:.2f}",
+            ]
+        )
+    rows.append([])
+    rows.append(["", "", "", "", "Closing Balance", "", "", f"{report['closing_balance']:.2f}"])
+    return rows
+
+
+def _all_ledgers_csv_rows(conn: sqlite3.Connection, *, year: int) -> list[list[object]]:
+    from_date = f"{year}-01-01"
+    to_date = f"{year}-12-31"
+    rows: list[list[object]] = [["General Ledger"], ["From", from_date], ["To", to_date], []]
+    account_rows = conn.execute(
+        """
+        SELECT DISTINCT a.id, a.code, a.name
+        FROM accounts a
+        JOIN journal_lines jl ON jl.account_id = a.id
+        JOIN journal_entries je ON je.id = jl.entry_id
+        WHERE je.is_void = 0
+          AND je.entry_date >= ?
+          AND je.entry_date <= ?
+        ORDER BY a.code
+        """,
+        (from_date, to_date),
+    ).fetchall()
+
+    for acct in account_rows:
+        report = general_ledger(
+            conn,
+            account_id=acct["id"],
+            from_date=from_date,
+            to_date=to_date,
+        )
+        rows.append([f"{report['account_code']} - {report['account_name']}"])
+        rows.extend(_ledger_csv_rows(report))
+        rows.append([])
+    return rows
+
+
+def _build_year_end_export_zip(
+    conn: sqlite3.Connection,
+    *,
+    year: int,
+    base_dir: Path,
+    db_path: Path,
+) -> bytes:
+    from_date = f"{year}-01-01"
+    to_date = f"{year}-12-31"
+
+    pnl_report = profit_and_loss(conn, from_date=from_date, to_date=to_date)
+    expense_report = expenses_by_category(conn, from_date=from_date, to_date=to_date)
+    ledger_rows = _all_ledgers_csv_rows(conn, year=year)
+
+    receipt_rows = conn.execute(
+        """
+        SELECT r.id, r.original_filename, r.stored_path, je.entry_date
+        FROM receipts r
+        JOIN journal_entries je ON je.id = r.entry_id
+        WHERE je.is_void = 0
+          AND je.entry_date >= ?
+          AND je.entry_date <= ?
+        ORDER BY je.entry_date, r.id
+        """,
+        (from_date, to_date),
+    ).fetchall()
+
+    archive = BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(f"reports/profit-and-loss_{year}.csv", _csv_text(_pnl_csv_rows(pnl_report)))
+        zf.writestr(
+            f"reports/expenses-by-category_{year}.csv",
+            _csv_text(_expenses_by_category_csv_rows(expense_report)),
+        )
+        zf.writestr(f"reports/general-ledger_{year}.csv", _csv_text(ledger_rows))
+
+        for row in receipt_rows:
+            month = row["entry_date"][5:7]
+            source_path = base_dir / row["stored_path"]
+            if not source_path.exists():
+                continue
+            safe_name = f"{row['id']}_{row['original_filename']}"
+            zf.write(source_path, arcname=f"receipts/{month}/{safe_name}")
+
+        if db_path.exists():
+            zf.write(db_path, arcname=f"database/saltstocks_{year}.db")
+
+    return archive.getvalue()
+
+
+def _csv_text(rows: list[list[object]]) -> str:
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerows(rows)
+    return buf.getvalue()
+
+
 def _owner_reimbursement_balance(conn: sqlite3.Connection) -> Decimal:
     """Return how much the business currently owes the owner back."""
     rows = conn.execute(
@@ -165,12 +322,210 @@ def _validate_reimburse_owner_amount(
     return balance
 
 
+def _owner_balance_detail(conn: sqlite3.Connection) -> dict:
+    """Return contribution/draw detail lists with running totals for owner balance."""
+    rows = conn.execute(
+        """
+        SELECT
+          je.id AS entry_id,
+          je.entry_date,
+          je.description,
+          je.template_id,
+          a.code AS account_code,
+          jl.debit,
+          jl.credit
+        FROM journal_lines jl
+        JOIN journal_entries je ON je.id = jl.entry_id
+        JOIN accounts a ON a.id = jl.account_id
+        WHERE je.is_void = 0
+          AND a.code IN ('3100', '3200')
+        ORDER BY je.entry_date, je.id, jl.id
+        """
+    ).fetchall()
+
+    contributions: list[dict] = []
+    draws: list[dict] = []
+    contributions_total = Decimal("0.00")
+    draws_total = Decimal("0.00")
+
+    for row in rows:
+        debit = Decimal(str(row["debit"] or "0")).quantize(Decimal("0.01"))
+        credit = Decimal(str(row["credit"] or "0")).quantize(Decimal("0.01"))
+        if row["account_code"] == "3100":
+            amount = (credit - debit).quantize(Decimal("0.01"))
+            if amount == Decimal("0.00"):
+                continue
+            contributions_total = (contributions_total + amount).quantize(Decimal("0.01"))
+            contributions.append(
+                {
+                    "entry_id": row["entry_id"],
+                    "entry_date": row["entry_date"],
+                    "description": row["description"],
+                    "template_id": row["template_id"],
+                    "amount": amount,
+                    "running_total": contributions_total,
+                }
+            )
+        elif row["account_code"] == "3200":
+            amount = (debit - credit).quantize(Decimal("0.01"))
+            if amount == Decimal("0.00"):
+                continue
+            draws_total = (draws_total + amount).quantize(Decimal("0.01"))
+            draws.append(
+                {
+                    "entry_id": row["entry_id"],
+                    "entry_date": row["entry_date"],
+                    "description": row["description"],
+                    "template_id": row["template_id"],
+                    "amount": amount,
+                    "running_total": draws_total,
+                }
+            )
+
+    return {
+        "contributions": contributions,
+        "draws": draws,
+        "total_contributions": contributions_total,
+        "total_draws": draws_total,
+        "balance": (contributions_total - draws_total).quantize(Decimal("0.01")),
+    }
+
+
 def _account_filter_for_step(step_id: str, answers: dict) -> Optional[str]:
     """Return the effective account filter for a step given current answers."""
     if step_id == "payment_account_id":
         template_id = answers.get("template_id")
         return _PAYMENT_ACCOUNT_FILTER_BY_TEMPLATE.get(template_id, "bank,credit_card,cash")
     return None
+
+
+def _parse_sales_tax_rate_percent(raw_rate: str) -> Decimal:
+    """Parse a percent-form sales-tax rate like '4.75' into stored decimal form."""
+    cleaned = raw_rate.strip().replace("%", "")
+    if not cleaned:
+        raise ValueError("Sales tax rate is required.")
+    try:
+        percent = Decimal(cleaned)
+    except InvalidOperation as exc:
+        raise ValueError("Sales tax rate must be a number like 4.75.") from exc
+    if percent < Decimal("0"):
+        raise ValueError("Sales tax rate cannot be negative.")
+    return (percent / Decimal("100")).quantize(Decimal("0.0001"))
+
+
+def _serialize_sales_tax_rate(rate: Decimal) -> str:
+    text = format(rate, "f").rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _load_sales_tax_rates(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT id, jurisdiction, rate, is_default, effective_from, effective_to
+        FROM sales_tax_rates
+        ORDER BY is_default DESC, jurisdiction COLLATE NOCASE, effective_from DESC, id DESC
+        """
+    ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "jurisdiction": row["jurisdiction"],
+            "rate": row["rate"],
+            "rate_percent": (Decimal(row["rate"]) * Decimal("100")).quantize(Decimal("0.01")),
+            "is_default": bool(row["is_default"]),
+            "effective_from": row["effective_from"],
+            "effective_to": row["effective_to"] or "",
+        }
+        for row in rows
+    ]
+
+
+def _load_default_sales_tax_rate(conn: sqlite3.Connection) -> Optional[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT id, jurisdiction, rate, effective_from, effective_to
+        FROM sales_tax_rates
+        WHERE is_default=1
+        ORDER BY effective_from DESC, id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+
+def _normalize_sales_tax_answers(
+    conn: sqlite3.Connection,
+    answer_dict: dict[str, object],
+) -> dict[str, object]:
+    if answer_dict.get("template_id") != "SELL_INVENTORY_CASH":
+        return answer_dict
+
+    applies = answer_dict.get("sales_tax_applies")
+    if applies != "yes":
+        answer_dict["sales_tax_amount"] = Decimal("0")
+        answer_dict["sales_tax_jurisdiction_id"] = None
+        return answer_dict
+
+    mode = answer_dict.get("sales_tax_mode")
+    total_amount = Decimal(str(answer_dict.get("total_amount", "0"))).quantize(Decimal("0.01"))
+
+    if mode == "manual":
+        tax = Decimal(str(answer_dict.get("sales_tax_amount", "0"))).quantize(Decimal("0.01"))
+        if tax < Decimal("0"):
+            raise ValueError("Sales tax amount cannot be negative.")
+        if tax > total_amount:
+            raise ValueError("Sales tax amount cannot exceed the sale total.")
+        answer_dict["sales_tax_amount"] = tax
+        return answer_dict
+
+    if mode == "auto":
+        rate_row = _load_default_sales_tax_rate(conn)
+        if rate_row is None:
+            raise ValueError("Set a default sales tax rate before using auto-calculate.")
+        rate = Decimal(str(rate_row["rate"]))
+        if rate < Decimal("0"):
+            raise ValueError("Default sales tax rate cannot be negative.")
+        tax = (total_amount * rate / (Decimal("1") + rate)).quantize(Decimal("0.01"))
+        answer_dict["sales_tax_amount"] = tax
+        answer_dict["sales_tax_jurisdiction_id"] = rate_row["id"]
+        return answer_dict
+
+    raise ValueError("Choose whether to auto-calculate sales tax or enter it manually.")
+
+
+def _validate_sales_tax_rate_form(
+    *,
+    jurisdiction: str,
+    rate_percent: str,
+    effective_from: str,
+    effective_to: str,
+) -> tuple[str, str, str, Optional[str]]:
+    jurisdiction_clean = jurisdiction.strip()
+    if not jurisdiction_clean:
+        raise ValueError("Jurisdiction is required.")
+
+    rate = _parse_sales_tax_rate_percent(rate_percent)
+
+    try:
+        parsed_from = date_type.fromisoformat(effective_from.strip())
+    except ValueError as exc:
+        raise ValueError("Effective from date must be a valid YYYY-MM-DD date.") from exc
+
+    parsed_to: Optional[date_type] = None
+    if effective_to.strip():
+        try:
+            parsed_to = date_type.fromisoformat(effective_to.strip())
+        except ValueError as exc:
+            raise ValueError("Effective to date must be a valid YYYY-MM-DD date.") from exc
+        if parsed_to < parsed_from:
+            raise ValueError("Effective to date cannot be earlier than effective from date.")
+
+    return (
+        jurisdiction_clean,
+        _serialize_sales_tax_rate(rate),
+        parsed_from.isoformat(),
+        parsed_to.isoformat() if parsed_to else None,
+    )
 
 
 def _resolve_sale_inventory_context(
@@ -417,6 +772,108 @@ def accounts_update(
     return RedirectResponse(url="/accounting/accounts?saved=1", status_code=303)
 
 
+@router.get("/settings/sales-tax", response_class=HTMLResponse)
+def sales_tax_settings_page(
+    request: Request,
+    saved: int = 0,
+    error: str = "",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    return render(
+        "accounting/settings_sales_tax.html",
+        request,
+        saved=saved == 1,
+        error=error,
+        rates=_load_sales_tax_rates(conn),
+    )
+
+
+@router.post("/settings/sales-tax")
+def sales_tax_settings_submit(
+    action: str = Form(...),
+    rate_id: str = Form(""),
+    jurisdiction: str = Form(""),
+    rate_percent: str = Form(""),
+    effective_from: str = Form(""),
+    effective_to: str = Form(""),
+    is_default: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    def err(message: str) -> RedirectResponse:
+        return RedirectResponse(
+            url=f"/accounting/settings/sales-tax?error={quote(message)}",
+            status_code=303,
+        )
+
+    if action not in {"add", "update"}:
+        return err("Unknown sales tax settings action.")
+
+    try:
+        jurisdiction_clean, rate_text, effective_from_text, effective_to_text = _validate_sales_tax_rate_form(
+            jurisdiction=jurisdiction,
+            rate_percent=rate_percent,
+            effective_from=effective_from,
+            effective_to=effective_to,
+        )
+    except ValueError as exc:
+        return err(str(exc))
+
+    wants_default = is_default == "1"
+
+    with conn:
+        if action == "add":
+            if wants_default:
+                conn.execute("UPDATE sales_tax_rates SET is_default=0 WHERE is_default=1")
+            conn.execute(
+                """
+                INSERT INTO sales_tax_rates (jurisdiction, rate, is_default, effective_from, effective_to)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    jurisdiction_clean,
+                    rate_text,
+                    1 if wants_default else 0,
+                    effective_from_text,
+                    effective_to_text,
+                ),
+            )
+        else:
+            try:
+                rate_id_int = int(rate_id)
+            except ValueError:
+                return err("Unknown sales tax rate.")
+
+            row = conn.execute(
+                "SELECT id, is_default FROM sales_tax_rates WHERE id=?",
+                (rate_id_int,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Sales tax rate not found")
+
+            if wants_default:
+                conn.execute("UPDATE sales_tax_rates SET is_default=0 WHERE is_default=1 AND id <> ?", (rate_id_int,))
+            else:
+                wants_default = bool(row["is_default"])
+
+            conn.execute(
+                """
+                UPDATE sales_tax_rates
+                SET jurisdiction=?, rate=?, is_default=?, effective_from=?, effective_to=?
+                WHERE id=?
+                """,
+                (
+                    jurisdiction_clean,
+                    rate_text,
+                    1 if wants_default else 0,
+                    effective_from_text,
+                    effective_to_text,
+                    rate_id_int,
+                ),
+            )
+
+    return RedirectResponse(url="/accounting/settings/sales-tax?saved=1", status_code=303)
+
+
 # ── Manual Entry Form (developer harness) ─────────────────────────────────────
 
 @router.get("/entry/manual", response_class=HTMLResponse)
@@ -633,6 +1090,196 @@ def report_balance_sheet(
     )
 
 
+@router.get("/reports/expenses-by-category", response_class=HTMLResponse)
+def report_expenses_by_category(
+    request: Request,
+    from_date: str = "",
+    to_date: str = "",
+    format: str = "html",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    today = date_type.today()
+    if not from_date:
+        from_date = today.replace(day=1).isoformat()
+    if not to_date:
+        to_date = today.isoformat()
+
+    try:
+        parsed_from = date_type.fromisoformat(from_date)
+        parsed_to = date_type.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    if parsed_to < parsed_from:
+        raise HTTPException(status_code=400, detail="To date must be on or after from date.")
+
+    report = expenses_by_category(conn, from_date=from_date, to_date=to_date)
+
+    if format == "csv":
+        filename = f"expenses-by-category_{from_date}_to_{to_date}.csv"
+        return _csv_response(filename, _expenses_by_category_csv_rows(report))
+    if format != "html":
+        raise HTTPException(status_code=400, detail="Unsupported format.")
+
+    return render(
+        "accounting/report_expenses_by_category.html",
+        request,
+        report=report,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
+@router.get("/reports/sales-tax", response_class=HTMLResponse)
+def report_sales_tax(
+    request: Request,
+    from_date: str = "",
+    to_date: str = "",
+    format: str = "html",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    today = date_type.today()
+    if not from_date:
+        from_date = today.replace(day=1).isoformat()
+    if not to_date:
+        to_date = today.isoformat()
+
+    try:
+        parsed_from = date_type.fromisoformat(from_date)
+        parsed_to = date_type.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    if parsed_to < parsed_from:
+        raise HTTPException(status_code=400, detail="To date must be on or after from date.")
+
+    report = sales_tax_summary(conn, from_date=from_date, to_date=to_date)
+
+    if format == "csv":
+        filename = f"sales-tax_{from_date}_to_{to_date}.csv"
+        return _csv_response(filename, _sales_tax_csv_rows(report))
+    if format != "html":
+        raise HTTPException(status_code=400, detail="Unsupported format.")
+
+    return render(
+        "accounting/report_sales_tax.html",
+        request,
+        report=report,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
+@router.get("/reports/ledger/{account_id}", response_class=HTMLResponse)
+def report_general_ledger(
+    account_id: int,
+    request: Request,
+    from_date: str = "",
+    to_date: str = "",
+    format: str = "html",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    if from_date:
+        try:
+            date_type.fromisoformat(from_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid from_date format. Use YYYY-MM-DD.")
+    if to_date:
+        try:
+            date_type.fromisoformat(to_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid to_date format. Use YYYY-MM-DD.")
+    if from_date and to_date and to_date < from_date:
+        raise HTTPException(status_code=400, detail="To date must be on or after from date.")
+
+    try:
+        report = general_ledger(
+            conn,
+            account_id=account_id,
+            from_date=from_date or None,
+            to_date=to_date or None,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    if format == "csv":
+        filename = f"ledger_{report['account_code']}_{from_date or 'start'}_to_{to_date or 'today'}.csv"
+        return _csv_response(filename, _ledger_csv_rows(report))
+    if format != "html":
+        raise HTTPException(status_code=400, detail="Unsupported format.")
+
+    return render(
+        "accounting/report_ledger.html",
+        request,
+        report=report,
+        from_date=from_date,
+        to_date=to_date,
+    )
+
+
+@router.get("/reports/year-end-export/{year}")
+def report_year_end_export(
+    year: int,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    if year < 2000 or year > 2100:
+        raise HTTPException(status_code=400, detail="Year must be between 2000 and 2100.")
+
+    payload = _build_year_end_export_zip(
+        conn,
+        year=year,
+        base_dir=BASE_DIR,
+        db_path=DB_PATH,
+    )
+    return Response(
+        content=payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="year-end-export_{year}.zip"'},
+    )
+
+
+@router.get("/receipts", response_class=HTMLResponse)
+def receipts_index_page(
+    request: Request,
+    from_date: str = "",
+    to_date: str = "",
+    template_id: str = "",
+    receipt_status: str = "all",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    if from_date:
+        try:
+            date_type.fromisoformat(from_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid from_date format. Use YYYY-MM-DD.")
+    if to_date:
+        try:
+            date_type.fromisoformat(to_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid to_date format. Use YYYY-MM-DD.")
+    if from_date and to_date and to_date < from_date:
+        raise HTTPException(status_code=400, detail="To date must be on or after from date.")
+    if receipt_status not in {"all", "has_receipt", "missing_receipt"}:
+        raise HTTPException(status_code=400, detail="Unsupported receipt status filter.")
+
+    report = receipt_index(
+        conn,
+        from_date=from_date or None,
+        to_date=to_date or None,
+        template_id=template_id or None,
+        receipt_status=receipt_status,
+    )
+    return render(
+        "accounting/receipts_index.html",
+        request,
+        report=report,
+        from_date=from_date,
+        to_date=to_date,
+        template_id=template_id,
+        receipt_status=receipt_status,
+    )
+
+
 # ── Entry Detail + Void ────────────────────────────────────────────────────────
 
 @router.get("/entries/{entry_id}", response_class=HTMLResponse)
@@ -801,6 +1448,19 @@ def receipt_file(
     )
 
 
+@router.get("/owner-balance", response_class=HTMLResponse)
+def owner_balance_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    detail = _owner_balance_detail(conn)
+    return render(
+        "accounting/owner_balance.html",
+        request,
+        detail=detail,
+    )
+
+
 # ── Questionnaire session helpers ─────────────────────────────────────────────
 
 def _load_session(conn: sqlite3.Connection, session_id: str) -> QuestionnaireSession:
@@ -837,9 +1497,22 @@ def _delete_session(conn: sqlite3.Connection, session_id: str) -> None:
 # ── Questionnaire routes ──────────────────────────────────────────────────────
 
 @router.get("/entry/start")
-def entry_start(conn: sqlite3.Connection = Depends(get_db)):
+def entry_start(
+    template_id: str = "",
+    prefill_owner_balance: int = 0,
+    conn: sqlite3.Connection = Depends(get_db),
+):
     """Create a fresh session and redirect to the first step."""
     session = QuestionnaireSession()
+    if template_id:
+        session.answers["template_id"] = template_id
+        session.history.append("template_id")
+    if template_id == "REIMBURSE_OWNER" and prefill_owner_balance == 1:
+        balance = _owner_reimbursement_balance(conn)
+        if balance > Decimal("0.00"):
+            session.answers["total_amount"] = balance
+            if "total_amount_reimburse_owner" not in session.history:
+                session.history.append("total_amount_reimburse_owner")
     _save_session(conn, session)
     return RedirectResponse(
         url=f"/accounting/entry/step/{session.session_id}",
@@ -879,6 +1552,19 @@ def entry_step(
             step_help_text = (
                 f"Current owed-back balance: ${owner_balance:.2f}. "
                 "Choose the business bank account the reimbursement should come from."
+            )
+    elif session.answers.get("template_id") == "SELL_INVENTORY_CASH" and step.id == "sales_tax_mode":
+        default_rate = _load_default_sales_tax_rate(conn)
+        if default_rate is not None:
+            rate_percent = (Decimal(str(default_rate["rate"])) * Decimal("100")).quantize(Decimal("0.01"))
+            step_help_text = (
+                f"Auto-calc uses your default jurisdiction, {default_rate['jurisdiction']}, "
+                f"at {rate_percent}% and backs tax out of the total sale amount."
+            )
+        else:
+            step_help_text = (
+                "Auto-calc uses your default sales tax jurisdiction and backs tax out of "
+                "the total sale amount. Set a default rate first if you want to use it."
             )
 
     step = replace(step, help_text=step_help_text)
@@ -975,6 +1661,15 @@ def entry_answer(
             url=f"/accounting/entry/step/{session_id}?error={quote(str(exc))}",
             status_code=303,
         )
+
+    if session.answers.get("template_id") == "SELL_INVENTORY_CASH":
+        if step_id == "sales_tax_applies" and session.answers.get("sales_tax_applies") != "yes":
+            session.answers.pop("sales_tax_mode", None)
+            session.answers.pop("sales_tax_amount", None)
+            session.answers.pop("sales_tax_jurisdiction_id", None)
+        elif step_id == "sales_tax_mode" and session.answers.get("sales_tax_mode") == "auto":
+            session.answers.pop("sales_tax_amount", None)
+            session.answers.pop("sales_tax_jurisdiction_id", None)
 
     _save_session(conn, session)
     return RedirectResponse(
@@ -1113,6 +1808,7 @@ def entry_preview_get(
 
     answer_dict = build_answer_set(session)
     try:
+        answer_dict = _normalize_sales_tax_answers(conn, answer_dict)
         tas = TransactionAnswerSet(**answer_dict)
     except Exception as exc:
         return RedirectResponse(
@@ -1300,6 +1996,46 @@ def _resolve_inventory_item_id(
     return cur.lastrowid
 
 
+def _insert_new_inventory_purchase_item(
+    tx_conn: sqlite3.Connection,
+    *,
+    name: str,
+    quantity: int,
+    unit_cost: Decimal,
+) -> int:
+    """Create a resale inventory item with a generated SKU for accounting purchases."""
+    sku = get_next_sku(tx_conn, _DEFAULT_NEW_RESALE_COMPANY, _DEFAULT_NEW_RESALE_CODE)
+    column_names = {
+        row["name"]
+        for row in tx_conn.execute("PRAGMA table_info(items)").fetchall()
+    }
+
+    values: dict[str, object] = {
+        "item_type": "resale",
+        "sku": sku,
+        "name": name,
+        "qty_on_hand": quantity,
+        "unit_cost": float(unit_cost),
+    }
+    optional_values = {
+        "company": _DEFAULT_NEW_RESALE_COMPANY,
+        "brand_code": _DEFAULT_NEW_RESALE_CODE,
+        "category": "Collectibles",
+        "unit": "each",
+    }
+    for key, value in optional_values.items():
+        if key in column_names:
+            values[key] = value
+
+    columns = ", ".join(values.keys())
+    placeholders = ", ".join("?" for _ in values)
+    cur = tx_conn.execute(
+        f"INSERT INTO items ({columns}) VALUES ({placeholders})",
+        tuple(values.values()),
+    )
+    return cur.lastrowid
+
+
 def _apply_inventory_purchase(
     tx_conn: sqlite3.Connection,
     req: PostEntryRequest,
@@ -1307,18 +2043,12 @@ def _apply_inventory_purchase(
 ) -> int:
     """Insert or update the purchased inventory item before posting the entry."""
     if purchase_ctx["mode"] == "create_new":
-        cur = tx_conn.execute(
-            """
-            INSERT INTO items (item_type, name, qty_on_hand, unit_cost)
-            VALUES ('resale', ?, ?, ?)
-            """,
-            (
-                purchase_ctx["item_name"],
-                purchase_ctx["quantity"],
-                float(purchase_ctx["allocated_unit_cost"]),
-            ),
+        item_id = _insert_new_inventory_purchase_item(
+            tx_conn,
+            name=purchase_ctx["item_name"],
+            quantity=purchase_ctx["quantity"],
+            unit_cost=purchase_ctx["allocated_unit_cost"],
         )
-        item_id = cur.lastrowid
     else:
         item_id = purchase_ctx["item_id"]
         tx_conn.execute(
@@ -1356,6 +2086,7 @@ async def entry_confirm(
 
     answer_dict = build_answer_set(session)
     try:
+        answer_dict = _normalize_sales_tax_answers(conn, answer_dict)
         tas = TransactionAnswerSet(**answer_dict)
     except Exception as exc:
         return RedirectResponse(

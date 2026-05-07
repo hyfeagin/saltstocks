@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>Owner Balance</h1>
+      <div class="ac-detail-value ac-report-meta">
+        Personal funds contributed to the business minus owner draws taken back out.
+      </div>
+    </div>
+    <a href="/" class="rs-btn rs-btn-ghost">← Dashboard</a>
+  </div>
+
+  <div class="rs-card ac-owner-balance-card" style="margin-bottom: 16px;">
+    <div class="ac-owner-balance-hero">
+      <div>
+        <div class="ac-detail-label">Current Reimbursement Balance</div>
+        <div class="ac-owner-balance-amount">${{ "%.2f"|format(detail["balance"]) }}</div>
+        <div class="ac-detail-value ac-report-meta">
+          Contributions ${{ "%.2f"|format(detail["total_contributions"]) }} minus draws ${{ "%.2f"|format(detail["total_draws"]) }}.
+        </div>
+      </div>
+      <div>
+        {% if detail["balance"] > 0 %}
+        <a href="/accounting/entry/start?template_id=REIMBURSE_OWNER&prefill_owner_balance=1"
+           class="rs-btn rs-btn-primary"
+           style="text-decoration:none;">Reimburse myself</a>
+        {% else %}
+        <span class="ac-pill ac-pill-system">Nothing owed back right now</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="ac-owner-balance-grid">
+    <div class="rs-card ac-owner-balance-card">
+      <h3 class="ac-section-title">Owner Contributions</h3>
+      {% if detail["contributions"] %}
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 110px;">Date</th>
+            <th>Description</th>
+            <th style="width: 110px;" class="ac-table-num">Amount</th>
+            <th style="width: 130px;" class="ac-table-num">Running Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in detail["contributions"] %}
+          <tr>
+            <td>{{ row["entry_date"] }}</td>
+            <td><a href="/accounting/entries/{{ row['entry_id'] }}" class="ac-entry-link">{{ row["description"] }}</a></td>
+            <td class="ac-table-num">${{ "%.2f"|format(row["amount"]) }}</td>
+            <td class="ac-table-num">${{ "%.2f"|format(row["running_total"]) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="ac-report-emphasis">
+            <td colspan="3">Total Contributions</td>
+            <td class="ac-table-num">${{ "%.2f"|format(detail["total_contributions"]) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+      {% else %}
+      <p class="ac-empty">No owner contributions recorded yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="rs-card ac-owner-balance-card">
+      <h3 class="ac-section-title">Owner Draws</h3>
+      {% if detail["draws"] %}
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 110px;">Date</th>
+            <th>Description</th>
+            <th style="width: 110px;" class="ac-table-num">Amount</th>
+            <th style="width: 130px;" class="ac-table-num">Running Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in detail["draws"] %}
+          <tr>
+            <td>{{ row["entry_date"] }}</td>
+            <td><a href="/accounting/entries/{{ row['entry_id'] }}" class="ac-entry-link">{{ row["description"] }}</a></td>
+            <td class="ac-table-num">${{ "%.2f"|format(row["amount"]) }}</td>
+            <td class="ac-table-num">${{ "%.2f"|format(row["running_total"]) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="ac-report-emphasis">
+            <td colspan="3">Total Draws</td>
+            <td class="ac-table-num">${{ "%.2f"|format(detail["total_draws"]) }}</td>
+          </tr>
+        </tfoot>
+      </table>
+      {% else %}
+      <p class="ac-empty">No owner draws recorded yet.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

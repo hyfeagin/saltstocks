@@ -280,6 +280,141 @@ def expenses_by_category(
     }
 
 
+def sales_tax_summary(
+    conn: sqlite3.Connection,
+    *,
+    from_date: str,
+    to_date: str,
+) -> dict:
+    where, params = _date_clause(from_date=from_date, to_date=to_date)
+    row = conn.execute(
+        f"""
+        SELECT
+          COALESCE(SUM(CAST(jl.debit AS REAL)), 0) AS debit_total,
+          COALESCE(SUM(CAST(jl.credit AS REAL)), 0) AS credit_total
+        FROM journal_lines jl
+        JOIN journal_entries je ON je.id = jl.entry_id
+        JOIN accounts a ON a.id = jl.account_id
+        WHERE {where}
+          AND a.code = '2100'
+        """,
+        params,
+    ).fetchone()
+
+    collected = _dec(row["credit_total"])
+    remitted = _dec(row["debit_total"])
+    net_liability = (collected - remitted).quantize(Decimal("0.01"))
+
+    return {
+        "from_date": from_date,
+        "to_date": to_date,
+        "collected": collected,
+        "remitted": remitted,
+        "net_liability": net_liability,
+    }
+
+
+def receipt_index(
+    conn: sqlite3.Connection,
+    *,
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    template_id: Optional[str] = None,
+    receipt_status: str = "all",
+) -> dict:
+    clauses = ["1=1"]
+    params: list[object] = []
+    if from_date:
+        clauses.append("je.entry_date >= ?")
+        params.append(from_date)
+    if to_date:
+        clauses.append("je.entry_date <= ?")
+        params.append(to_date)
+    if template_id:
+        clauses.append("je.template_id = ?")
+        params.append(template_id)
+
+    having = ""
+    if receipt_status == "has_receipt":
+        having = "HAVING COUNT(r.id) > 0"
+    elif receipt_status == "missing_receipt":
+        having = "HAVING COUNT(r.id) = 0"
+
+    rows = conn.execute(
+        f"""
+        SELECT
+          je.id AS entry_id,
+          je.entry_date,
+          je.template_id,
+          je.description,
+          je.total_amount,
+          je.vendor,
+          je.is_void,
+          COUNT(r.id) AS receipt_count,
+          MIN(r.id) AS primary_receipt_id
+        FROM journal_entries je
+        LEFT JOIN receipts r ON r.entry_id = je.id
+        WHERE {' AND '.join(clauses)}
+        GROUP BY je.id, je.entry_date, je.template_id, je.description, je.total_amount, je.vendor, je.is_void
+        {having}
+        ORDER BY je.entry_date DESC, je.id DESC
+        """,
+        params,
+    ).fetchall()
+
+    items: list[dict] = []
+    for row in rows:
+        primary_receipt = None
+        if row["primary_receipt_id"] is not None:
+            primary_receipt = conn.execute(
+                """
+                SELECT id, original_filename, mime_type, stored_path, file_size_bytes, uploaded_at
+                FROM receipts
+                WHERE id=?
+                """,
+                (row["primary_receipt_id"],),
+            ).fetchone()
+
+        items.append(
+            {
+                "entry_id": row["entry_id"],
+                "entry_date": row["entry_date"],
+                "template_id": row["template_id"],
+                "description": row["description"],
+                "total_amount": _dec(row["total_amount"]),
+                "vendor": row["vendor"],
+                "is_void": bool(row["is_void"]),
+                "receipt_count": int(row["receipt_count"] or 0),
+                "has_receipt": bool(row["receipt_count"]),
+                "primary_receipt": {
+                    "id": primary_receipt["id"],
+                    "original_filename": primary_receipt["original_filename"],
+                    "mime_type": primary_receipt["mime_type"],
+                    "stored_path": primary_receipt["stored_path"],
+                    "file_size_bytes": primary_receipt["file_size_bytes"],
+                    "uploaded_at": primary_receipt["uploaded_at"],
+                    "is_image": bool(primary_receipt["mime_type"] and str(primary_receipt["mime_type"]).startswith("image/")),
+                    "is_pdf": primary_receipt["mime_type"] == "application/pdf",
+                }
+                if primary_receipt is not None
+                else None,
+            }
+        )
+
+    template_rows = conn.execute(
+        "SELECT DISTINCT template_id FROM journal_entries ORDER BY template_id"
+    ).fetchall()
+
+    return {
+        "items": items,
+        "template_ids": [row["template_id"] for row in template_rows],
+        "from_date": from_date or "",
+        "to_date": to_date or "",
+        "template_id": template_id or "",
+        "receipt_status": receipt_status,
+    }
+
+
 def general_ledger(
     conn: sqlite3.Connection,
     *,

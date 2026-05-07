@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>Account Activity</h1>
+      <div class="ac-detail-value ac-report-meta">
+        <span class="ac-code">{{ report.account_code }}</span> {{ report.account_name }}
+      </div>
+    </div>
+    <a href="/accounting/accounts" class="rs-btn rs-btn-ghost">← Accounts</a>
+  </div>
+
+  <div class="rs-search-shell ac-report-shell">
+    <form method="get" action="/accounting/reports/ledger/{{ report.account_id }}" class="ac-filter-bar">
+      <div class="ac-filter-field">
+        <label>From</label>
+        <input type="date" name="from_date" value="{{ from_date }}" />
+      </div>
+      <div class="ac-filter-field">
+        <label>To</label>
+        <input type="date" name="to_date" value="{{ to_date }}" />
+      </div>
+      <div class="ac-filter-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Run Report</button>
+        <a href="/accounting/reports/ledger/{{ report.account_id }}?from_date={{ from_date }}&to_date={{ to_date }}&format=csv"
+           class="rs-btn rs-btn-ghost">Download CSV</a>
+      </div>
+    </form>
+  </div>
+
+  {% include "accounting/_reports_nav.html" %}
+
+  <div class="ac-report-grid">
+    <div class="ac-ledger-summary">
+      <div class="rs-card ac-report-card ac-ledger-card">
+        <div class="ac-detail-label">Opening Balance</div>
+        <div class="ac-detail-value">${{ "%.2f"|format(report.opening_balance) }}</div>
+      </div>
+      <div class="rs-card ac-report-card ac-ledger-card">
+        <div class="ac-detail-label">Account Type</div>
+        <div class="ac-detail-value">{{ report.account_type | title }}</div>
+      </div>
+      <div class="rs-card ac-report-card ac-ledger-card">
+        <div class="ac-detail-label">Closing Balance</div>
+        <div class="ac-detail-value">${{ "%.2f"|format(report.closing_balance) }}</div>
+      </div>
+    </div>
+
+    <div class="rs-card ac-report-card">
+      <table class="ac-report-table ac-ledger-table">
+        <thead>
+          <tr>
+            <th class="ac-report-pad-left ac-col-date">Date</th>
+            <th class="ac-col-entry">Entry</th>
+            <th class="ac-col-template">Template</th>
+            <th>Description</th>
+            <th>Memo</th>
+            <th>Debit</th>
+            <th>Credit</th>
+            <th class="ac-report-pad-right">Running Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in report.lines %}
+          <tr>
+            <td class="ac-report-pad-left">{{ line.entry_date }}</td>
+            <td><a href="/accounting/entries/{{ line.entry_id }}" class="ac-entry-link">#{{ line.entry_id }}</a></td>
+            <td><span class="ac-code">{{ line.template_id }}</span></td>
+            <td>{{ line.description }}</td>
+            <td class="ac-muted-cell">{{ line.memo or '—' }}</td>
+            <td>${{ "%.2f"|format(line.debit) }}</td>
+            <td>${{ "%.2f"|format(line.credit) }}</td>
+            <td class="ac-report-pad-right">${{ "%.2f"|format(line.running_balance) }}</td>
+          </tr>
+          {% endfor %}
+          <tr class="ac-report-emphasis">
+            <td class="ac-report-pad-left" colspan="7">Closing Balance</td>
+            <td class="ac-report-pad-right">${{ "%.2f"|format(report.closing_balance) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from datetime import date
 from typing import Any, Generator
 
 from fastapi import Request
@@ -25,7 +26,10 @@ templates.env.globals["EBAY_ENVIRONMENTS"] = EBAY_ENVIRONMENTS
 
 def render(template_name: str, request: Request, **context: Any) -> HTMLResponse:
     """Shorthand for templates.TemplateResponse — injects request automatically."""
-    return templates.TemplateResponse(template_name, {"request": request, **context})
+    return templates.TemplateResponse(
+        template_name,
+        {"request": request, "current_year": date.today().year, **context},
+    )
 
 
 def get_db() -> Generator[sqlite3.Connection, None, None]:

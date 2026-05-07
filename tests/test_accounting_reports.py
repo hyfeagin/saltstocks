@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
-from app.accounting.reports import balance_sheet, expenses_by_category, general_ledger, profit_and_loss
+from app.accounting.reports import balance_sheet, expenses_by_category, general_ledger, profit_and_loss, sales_tax_summary
 
 
 def _reports_conn() -> sqlite3.Connection:
@@ -58,7 +58,8 @@ def _reports_conn() -> sqlite3.Connection:
             (3, "2026-01-10", "Sale", "SELL_INVENTORY_CASH", "55.00", 0),
             (4, "2026-01-10", "Auto COGS", "COGS_RECOGNITION", "10.00", 0),
             (5, "2026-01-20", "Rebate", "OTHER_INCOME", "5.00", 0),
-            (6, "2026-01-25", "Voided sample", "OTHER_INCOME", "99.00", 1)
+            (6, "2026-01-22", "Tax payment", "SALES_TAX_REMITTED", "2.00", 0),
+            (7, "2026-01-25", "Voided sample", "OTHER_INCOME", "99.00", 1)
         ],
     )
     conn.executemany(
@@ -75,8 +76,10 @@ def _reports_conn() -> sqlite3.Connection:
             (9, 4, 2, "0.00", "10.00", None),
             (10, 5, 1, "5.00", "0.00", None),
             (11, 5, 7, "0.00", "5.00", None),
-            (12, 6, 1, "99.00", "0.00", None),
-            (13, 6, 7, "0.00", "99.00", None)
+            (12, 6, 4, "2.00", "0.00", None),
+            (13, 6, 1, "0.00", "2.00", None),
+            (14, 7, 1, "99.00", "0.00", None),
+            (15, 7, 7, "0.00", "99.00", None)
         ],
     )
     return conn
@@ -99,10 +102,10 @@ class AccountingReportsTests(unittest.TestCase):
         conn = _reports_conn()
         try:
             report = balance_sheet(conn, as_of="2026-01-31")
-            self.assertEqual(str(report["total_assets"]), "130.00")
-            self.assertEqual(str(report["total_liabilities"]), "5.00")
+            self.assertEqual(str(report["total_assets"]), "128.00")
+            self.assertEqual(str(report["total_liabilities"]), "3.00")
             self.assertEqual(str(report["total_equity"]), "125.00")
-            self.assertEqual(str(report["total_liabilities_and_equity"]), "130.00")
+            self.assertEqual(str(report["total_liabilities_and_equity"]), "128.00")
         finally:
             conn.close()
 
@@ -121,7 +124,17 @@ class AccountingReportsTests(unittest.TestCase):
         try:
             report = general_ledger(conn, account_id=1, from_date="2026-01-05", to_date="2026-01-31")
             self.assertEqual(str(report["opening_balance"]), "100.00")
-            self.assertEqual(str(report["closing_balance"]), "140.00")
-            self.assertEqual([str(line.running_balance) for line in report["lines"]], ["80.00", "135.00", "140.00"])
+            self.assertEqual(str(report["closing_balance"]), "138.00")
+            self.assertEqual([str(line.running_balance) for line in report["lines"]], ["80.00", "135.00", "140.00", "138.00"])
+        finally:
+            conn.close()
+
+    def test_sales_tax_summary_returns_collected_remitted_and_net_liability(self) -> None:
+        conn = _reports_conn()
+        try:
+            report = sales_tax_summary(conn, from_date="2026-01-01", to_date="2026-01-31")
+            self.assertEqual(str(report["collected"]), "5.00")
+            self.assertEqual(str(report["remitted"]), "2.00")
+            self.assertEqual(str(report["net_liability"]), "3.00")
         finally:
             conn.close()

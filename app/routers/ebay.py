@@ -3,11 +3,13 @@ from __future__ import annotations
 import sqlite3
 import urllib.parse as _up
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from ..accounting.posting import JournalLineInput, PostEntryRequest, _insert_post_entry, _validate_post_entry
 from ..constants import DEFAULT_ENVIRONMENT
 from ..deps import render, get_db
 from ..utils import (
@@ -28,6 +30,59 @@ from ..integrations.ebay import (
 )
 
 router = APIRouter()
+
+
+def _post_ebay_cogs_entry(
+    conn: sqlite3.Connection,
+    *,
+    order_id: str,
+    line_item_id: str,
+    item_id: int,
+    item_name: str,
+    sku: Optional[str],
+    quantity_deducted: Decimal,
+    unit_cost: Decimal,
+) -> Optional[int]:
+    """Post the auto-COGS entry corresponding to an eBay inventory deduction."""
+    if quantity_deducted <= Decimal("0") or unit_cost <= Decimal("0"):
+        return None
+
+    account_rows = conn.execute(
+        "SELECT code, id FROM accounts WHERE code IN ('1200', '5000')"
+    ).fetchall()
+    account_map = {row["code"]: row["id"] for row in account_rows}
+    if "1200" not in account_map or "5000" not in account_map:
+        raise ValueError("Missing required accounting accounts for auto COGS (1200 and 5000).")
+
+    cogs_amount = (quantity_deducted * unit_cost).quantize(Decimal("0.01"))
+    if cogs_amount <= Decimal("0"):
+        return None
+
+    label = sku or item_name or f"item {item_id}"
+    req = PostEntryRequest(
+        entry_date=date.today(),
+        description=f"Auto COGS — eBay import — {label}",
+        template_id="COGS_RECOGNITION",
+        total_amount=cogs_amount,
+        lines=[
+            JournalLineInput(
+                account_id=account_map["5000"],
+                debit=cogs_amount,
+                memo="Auto COGS",
+                inventory_item_id=item_id,
+            ),
+            JournalLineInput(
+                account_id=account_map["1200"],
+                credit=cogs_amount,
+                memo="Auto COGS",
+                inventory_item_id=item_id,
+            ),
+        ],
+        created_by_method="import_ebay",
+        notes=f"Auto-generated from eBay order {order_id} line {line_item_id}",
+    )
+    _validate_post_entry(req)
+    return _insert_post_entry(conn, req)
 
 
 def _ebay_import_response(
@@ -303,7 +358,7 @@ def ebay_import_run(
     if skus:
         placeholders = ",".join(["?"] * len(skus))
         item_rows = conn.execute(
-            f"SELECT id, sku, name, qty_on_hand FROM items WHERE item_type='resale' AND sku IN ({placeholders}) ORDER BY id ASC",
+            f"SELECT id, sku, name, qty_on_hand, unit_cost FROM items WHERE item_type='resale' AND sku IN ({placeholders}) ORDER BY id ASC",
             tuple(skus),
         ).fetchall()
         for item in item_rows:
@@ -319,12 +374,14 @@ def ebay_import_run(
         item_id = None
         current_qty = None
         projected_qty = None
+        item_unit_cost = None
         clamped = False
 
         if item is not None:
             item_id = item["id"]
             item_name = item["name"]
             current_qty = float(item["qty_on_hand"] or 0)
+            item_unit_cost = float(item["unit_cost"] or 0)
             projected_qty = max(0.0, current_qty - candidate["qty_sold"])
             clamped = candidate["qty_sold"] > current_qty
             status = "oversold/clamped" if clamped else "matched"
@@ -339,6 +396,7 @@ def ebay_import_run(
             "item_name": item_name,
             "current_qty_on_hand": current_qty,
             "projected_qty_on_hand": projected_qty,
+            "item_unit_cost": item_unit_cost,
             "status": status,
             "clamped": clamped,
         })
@@ -386,6 +444,20 @@ def ebay_import_run(
                         WHERE id=? AND item_type='resale'
                         """,
                         (row["qty_sold"], row["qty_sold"], row["item_id"]),
+                    )
+                    quantity_deducted = min(
+                        Decimal(str(row["qty_sold"] or 0)),
+                        Decimal(str(row["current_qty_on_hand"] or 0)),
+                    ).quantize(Decimal("0.01"))
+                    _post_ebay_cogs_entry(
+                        conn,
+                        order_id=row["order_id"],
+                        line_item_id=row["line_item_id"],
+                        item_id=row["item_id"],
+                        item_name=row["item_name"],
+                        sku=row["sku"],
+                        quantity_deducted=quantity_deducted,
+                        unit_cost=Decimal(str(row["item_unit_cost"] or 0)).quantize(Decimal("0.01")),
                     )
                     applied_logs += 1
                     applied_updates += 1

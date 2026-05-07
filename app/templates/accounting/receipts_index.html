@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>Receipts</h1>
+      <div class="ac-detail-value ac-report-meta">
+        Review which accounting entries have attachments and which still need documentation.
+      </div>
+    </div>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← Entries</a>
+  </div>
+
+  {% include "accounting/_reports_nav.html" %}
+
+  <div class="rs-search-shell ac-report-shell">
+    <form method="get" action="/accounting/receipts" class="ac-filter-bar">
+      <div class="ac-filter-field">
+        <label>From</label>
+        <input type="date" name="from_date" value="{{ from_date }}" />
+      </div>
+      <div class="ac-filter-field">
+        <label>To</label>
+        <input type="date" name="to_date" value="{{ to_date }}" />
+      </div>
+      <div class="ac-filter-field">
+        <label>Receipt Status</label>
+        <select name="receipt_status">
+          <option value="all" {{ 'selected' if receipt_status == 'all' else '' }}>All entries</option>
+          <option value="has_receipt" {{ 'selected' if receipt_status == 'has_receipt' else '' }}>Has receipt</option>
+          <option value="missing_receipt" {{ 'selected' if receipt_status == 'missing_receipt' else '' }}>Missing receipt</option>
+        </select>
+      </div>
+      <div class="ac-filter-field">
+        <label>Template</label>
+        <select name="template_id">
+          <option value="">All templates</option>
+          {% for tid in report["template_ids"] %}
+            <option value="{{ tid }}" {{ 'selected' if template_id == tid else '' }}>{{ tid }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="ac-filter-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Filter</button>
+        {% if from_date or to_date or template_id or receipt_status != 'all' %}
+          <a href="/accounting/receipts" class="rs-btn rs-btn-ghost">Clear</a>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+  {% if report["items"] %}
+  <div class="ac-receipts-grid">
+    {% for item in report["items"] %}
+    <a href="/accounting/entries/{{ item.entry_id }}" class="rs-card ac-receipt-card">
+      <div class="ac-receipt-preview">
+        {% if item.primary_receipt and item.primary_receipt.is_image %}
+          <img src="/accounting/receipts/{{ item.primary_receipt.id }}/file" alt="{{ item.primary_receipt.original_filename }}" />
+        {% elif item.primary_receipt and item.primary_receipt.is_pdf %}
+          <div class="ac-receipt-icon">PDF</div>
+        {% elif item.primary_receipt %}
+          <div class="ac-receipt-icon">FILE</div>
+        {% else %}
+          <div class="ac-receipt-icon">MISSING</div>
+        {% endif %}
+      </div>
+      <div class="ac-receipt-body">
+        <div class="ac-receipt-meta">
+          <span class="ac-code">{{ item.template_id }}</span>
+          {% if item.has_receipt %}
+            <span class="ac-pill ac-pill-posted">{{ item.receipt_count }} receipt{{ '' if item.receipt_count == 1 else 's' }}</span>
+          {% else %}
+            <span class="ac-pill ac-pill-system">Missing receipt</span>
+          {% endif %}
+        </div>
+        <p class="ac-receipt-desc">{{ item.description }}</p>
+        <p class="ac-receipt-subtext">
+          Entry #{{ item.entry_id }} · {{ item.entry_date }} · ${{ "%.2f"|format(item.total_amount) }}
+        </p>
+        {% if item.vendor %}
+        <p class="ac-receipt-subtext">Vendor: {{ item.vendor }}</p>
+        {% endif %}
+        {% if item.primary_receipt %}
+        <p class="ac-receipt-subtext">{{ item.primary_receipt.original_filename }}</p>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="rs-card" style="padding: 20px 22px;">
+    <p class="ac-empty">No entries matched those receipt filters.</p>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

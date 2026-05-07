@@ -5,7 +5,16 @@ import unittest
 from decimal import Decimal
 
 from app.accounting.questionnaire import QuestionnaireSession, next_visible_step, record_answer
-from app.accounting.routes import _owner_reimbursement_balance, _validate_reimburse_owner_amount
+from app.accounting.routes import (
+    _load_session,
+    _owner_balance_detail,
+    _owner_reimbursement_balance,
+    _validate_reimburse_owner_amount,
+    entry_start,
+    owner_balance_page,
+)
+from starlette.requests import Request
+from starlette.templating import _TemplateResponse
 
 
 def _memory_conn() -> sqlite3.Connection:
@@ -19,6 +28,9 @@ def _memory_conn() -> sqlite3.Connection:
         );
         CREATE TABLE journal_entries (
           id INTEGER PRIMARY KEY,
+          entry_date TEXT,
+          description TEXT,
+          template_id TEXT,
           is_void INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE journal_lines (
@@ -28,9 +40,19 @@ def _memory_conn() -> sqlite3.Connection:
           debit TEXT NOT NULL DEFAULT '0',
           credit TEXT NOT NULL DEFAULT '0'
         );
+        CREATE TABLE questionnaire_sessions (
+          session_id TEXT PRIMARY KEY,
+          data TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
         """
     )
     return conn
+
+
+def _request() -> Request:
+    return Request({"type": "http", "method": "GET", "path": "/accounting/owner-balance", "headers": []})
 
 
 class ReimburseOwnerFlowTests(unittest.TestCase):
@@ -57,8 +79,12 @@ class ReimburseOwnerFlowTests(unittest.TestCase):
                 [(1, "3100"), (2, "3200")],
             )
             conn.executemany(
-                "INSERT INTO journal_entries (id, is_void) VALUES (?, ?)",
-                [(1, 0), (2, 0), (3, 1)],
+                "INSERT INTO journal_entries (id, entry_date, description, template_id, is_void) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (1, "2026-01-01", "Owner contribution", "OWNER_CONTRIBUTION", 0),
+                    (2, "2026-01-02", "Owner draw", "OWNER_DRAW", 0),
+                    (3, "2026-01-03", "Voided contribution", "OWNER_CONTRIBUTION", 1),
+                ],
             )
             conn.executemany(
                 "INSERT INTO journal_lines (entry_id, account_id, debit, credit) VALUES (?, ?, ?, ?)",
@@ -81,8 +107,11 @@ class ReimburseOwnerFlowTests(unittest.TestCase):
                 [(1, "3100"), (2, "3200")],
             )
             conn.executemany(
-                "INSERT INTO journal_entries (id, is_void) VALUES (?, ?)",
-                [(1, 0), (2, 0)],
+                "INSERT INTO journal_entries (id, entry_date, description, template_id, is_void) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (1, "2026-01-01", "Owner contribution", "OWNER_CONTRIBUTION", 0),
+                    (2, "2026-01-02", "Owner draw", "OWNER_DRAW", 0),
+                ],
             )
             conn.executemany(
                 "INSERT INTO journal_lines (entry_id, account_id, debit, credit) VALUES (?, ?, ?, ?)",
@@ -98,6 +127,75 @@ class ReimburseOwnerFlowTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "cannot exceed"):
                 _validate_reimburse_owner_amount(conn, Decimal("25.01"))
+        finally:
+            conn.close()
+
+    def test_owner_balance_detail_splits_contributions_and_draws_with_running_totals(self) -> None:
+        conn = _memory_conn()
+        try:
+            conn.executemany(
+                "INSERT INTO accounts (id, code) VALUES (?, ?)",
+                [(1, "3100"), (2, "3200")],
+            )
+            conn.executemany(
+                "INSERT INTO journal_entries (id, entry_date, description, template_id, is_void) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (1, "2026-01-01", "Owner contribution A", "OWNER_CONTRIBUTION", 0),
+                    (2, "2026-01-02", "Owner draw", "OWNER_DRAW", 0),
+                    (3, "2026-01-03", "Owner contribution B", "OWNER_CONTRIBUTION", 0),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO journal_lines (entry_id, account_id, debit, credit) VALUES (?, ?, ?, ?)",
+                [
+                    (1, 1, "0", "30.00"),
+                    (2, 2, "5.00", "0"),
+                    (3, 1, "0", "12.00"),
+                ],
+            )
+
+            detail = _owner_balance_detail(conn)
+            self.assertEqual([str(row["running_total"]) for row in detail["contributions"]], ["30.00", "42.00"])
+            self.assertEqual([str(row["running_total"]) for row in detail["draws"]], ["5.00"])
+            self.assertEqual(str(detail["total_contributions"]), "42.00")
+            self.assertEqual(str(detail["total_draws"]), "5.00")
+            self.assertEqual(str(detail["balance"]), "37.00")
+        finally:
+            conn.close()
+
+    def test_owner_balance_page_renders_and_reimburse_start_prefills_full_balance(self) -> None:
+        conn = _memory_conn()
+        try:
+            conn.executemany(
+                "INSERT INTO accounts (id, code) VALUES (?, ?)",
+                [(1, "3100"), (2, "3200")],
+            )
+            conn.executemany(
+                "INSERT INTO journal_entries (id, entry_date, description, template_id, is_void) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (1, "2026-01-01", "Owner contribution", "OWNER_CONTRIBUTION", 0),
+                    (2, "2026-01-02", "Owner draw", "OWNER_DRAW", 0),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO journal_lines (entry_id, account_id, debit, credit) VALUES (?, ?, ?, ?)",
+                [
+                    (1, 1, "0", "50.00"),
+                    (2, 2, "8.00", "0"),
+                ],
+            )
+
+            response = owner_balance_page(request=_request(), conn=conn)
+            self.assertIsInstance(response, _TemplateResponse)
+            self.assertEqual(response.template.name, "accounting/owner_balance.html")
+            self.assertEqual(response.context["detail"]["balance"].__str__(), "42.00")
+
+            redirect = entry_start(template_id="REIMBURSE_OWNER", prefill_owner_balance=1, conn=conn)
+            session_id = redirect.headers["location"].rsplit("/", 1)[-1]
+            session = _load_session(conn, session_id)
+            self.assertEqual(session.answers["template_id"], "REIMBURSE_OWNER")
+            self.assertEqual(str(session.answers["total_amount"]), "42.00")
+            self.assertEqual(session.history, ["template_id", "total_amount_reimburse_owner"])
         finally:
             conn.close()
 

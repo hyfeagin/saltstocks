@@ -1984,11 +1984,11 @@ Check items off as they are completed. Items are ordered so each one can be done
 - [x] Create `app/accounting/reports.py` — SQL queries for P&L, Balance Sheet, Expense by Category, General Ledger
 - [x] `GET /accounting/reports/pnl?from=&to=` — HTML report + "Download CSV" button; format matches §11.1
 - [x] `GET /accounting/reports/balance-sheet?asof=` — HTML + CSV; §11.2
-- [ ] `GET /accounting/reports/expenses-by-category?from=&to=` — HTML table + CSV; §11.3
-- [ ] `GET /accounting/reports/ledger/{account_id}?from=&to=` — chronological entry list with running balance; §11.5
-- [ ] `GET /accounting/reports/year-end-export/{year}` — ZIP bundle: P&L CSV, Expense CSV, General Ledger CSV, all receipts organized by month, SQLite snapshot; §11.6
-- [ ] Add Reports nav section to accounting area (links to each report)
-- [ ] Apply design system to all report templates (canonical card for report container, table styling)
+- [x] `GET /accounting/reports/expenses-by-category?from=&to=` — HTML table + CSV; §11.3
+- [x] `GET /accounting/reports/ledger/{account_id}?from=&to=` — chronological entry list with running balance; §11.5
+- [x] `GET /accounting/reports/year-end-export/{year}` — ZIP bundle: P&L CSV, Expense CSV, General Ledger CSV, all receipts organized by month, SQLite snapshot; §11.6
+- [x] Add Reports nav section to accounting area (links to each report)
+- [x] Apply design system to all report templates (canonical card for report container, table styling)
 
 **Exit criteria checkpoint:** can produce tax-ready CSV outputs from questionnaire-entered data.
 
@@ -1997,23 +1997,23 @@ Check items off as they are completed. Items are ordered so each one can be done
 ### Phase 4 — Sales Tax, Receipt Vault, Dashboard Widget
 
 **Sales tax**
-- [ ] Sales tax rates admin UI — `GET/POST /accounting/settings/sales-tax`; add/edit jurisdictions and rates; default = North Carolina
-- [ ] Add sales tax step to `SELL_INVENTORY_CASH` questionnaire flow (taxable? yes/no → amount or auto-calc from rate)
-- [ ] `GET /accounting/reports/sales-tax?from=&to=` — collected, remitted, net liability; §10.3
-- [ ] Wire `SALES_TAX_REMITTED` to clear Sales Tax Payable balance
+- [x] Sales tax rates admin UI — `GET/POST /accounting/settings/sales-tax`; add/edit jurisdictions and rates; default = North Carolina
+- [x] Add sales tax step to `SELL_INVENTORY_CASH` questionnaire flow (taxable? yes/no → amount or auto-calc from rate)
+- [x] `GET /accounting/reports/sales-tax?from=&to=` — collected, remitted, net liability; §10.3
+- [x] Wire `SALES_TAX_REMITTED` to clear Sales Tax Payable balance
 
 **Inventory linkage on buy**
-- [ ] On `BUY_INVENTORY` / `BUY_INVENTORY_PERSONAL` confirm: if "create new SKU" → call existing `get_next_sku()` and insert into `items` table; if "link existing" → increment `qty_on_hand` and update `unit_cost` (weighted average)
+- [x] On `BUY_INVENTORY` / `BUY_INVENTORY_PERSONAL` confirm: if "create new SKU" → call existing `get_next_sku()` and insert into `items` table; if "link existing" → increment `qty_on_hand` and update `unit_cost` (weighted average)
 
 **Auto-COGS on eBay import**
-- [ ] Hook into `app/routers/ebay.py` `ebay_import_run` apply path — after each `UPDATE items SET qty_on_hand=...`, post a `COGS_RECOGNITION` journal entry: Dr. COGS / Cr. Inventory, amount = qty_sold × unit_cost
+- [x] Hook into `app/routers/ebay.py` `ebay_import_run` apply path — after each `UPDATE items SET qty_on_hand=...`, post a `COGS_RECOGNITION` journal entry: Dr. COGS / Cr. Inventory, amount = qty_sold × unit_cost
 
 **Receipt vault browse**
-- [ ] `GET /accounting/receipts` — thumbnail grid (or icon list for non-images), filters: date range, has-receipt vs missing-receipt, template; click → entry detail; §9.2
+- [x] `GET /accounting/receipts` — thumbnail grid (or icon list for non-images), filters: date range, has-receipt vs missing-receipt, template; click → entry detail; §9.2
 
 **"Owed back to you" widget**
-- [ ] Add widget to main dashboard (`app/templates/dashboard.html`) — queries Owner Contributions balance − Owner Draws balance; shows big number + "Reimburse myself" link
-- [ ] `GET /accounting/owner-balance` — detail page: two columns (contributions list, draws list), running totals, "Reimburse myself" button that pre-fills `REIMBURSE_OWNER` questionnaire with full balance
+- [x] Add widget to main dashboard (`app/templates/dashboard.html`) — queries Owner Contributions balance − Owner Draws balance; shows big number + "Reimburse myself" link
+- [x] `GET /accounting/owner-balance` — detail page: two columns (contributions list, draws list), running totals, "Reimburse myself" button that pre-fills `REIMBURSE_OWNER` questionnaire with full balance
 
 **Backup extension**
 - [ ] Extend `app/routers/dashboard.py` `backup_now()` — after copying the SQLite file, also `shutil.copytree` `data/receipts/` into the backup archive

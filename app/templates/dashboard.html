@@ -2,6 +2,20 @@
 {% block content %}
 <h1>Salt Stocks</h1>
 
+<div class="card" style="margin-bottom: 16px;">
+  <h3>Owner Reimbursement</h3>
+  <div style="font-size: 2rem; font-weight: 700; line-height: 1; margin: 8px 0 10px;">
+    ${{ "%.2f"|format(owner_reimbursement_balance) }}
+  </div>
+  <p class="muted" style="margin-top: 0;">
+    Personal funds used for the business minus owner draws.
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a href="/accounting/owner-balance" class="btn" style="text-decoration:none;">View details</a>
+    <a href="/accounting/entry/start?template_id=REIMBURSE_OWNER&prefill_owner_balance=1" class="btn btn-primary" style="text-decoration:none;">Reimburse myself</a>
+  </div>
+</div>
+
 <div class="card">
   <h3>Quick stats</h3>
   <ul>

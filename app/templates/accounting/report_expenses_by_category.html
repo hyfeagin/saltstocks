@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>Expenses by Category</h1>
+      <div class="ac-detail-value ac-report-meta">
+        {{ from_date }} through {{ to_date }}
+      </div>
+    </div>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← Entries</a>
+  </div>
+
+  <div class="rs-search-shell ac-report-shell">
+    <form method="get" action="/accounting/reports/expenses-by-category" class="ac-filter-bar">
+      <div class="ac-filter-field">
+        <label>From</label>
+        <input type="date" name="from_date" value="{{ from_date }}" />
+      </div>
+      <div class="ac-filter-field">
+        <label>To</label>
+        <input type="date" name="to_date" value="{{ to_date }}" />
+      </div>
+      <div class="ac-filter-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Run Report</button>
+        <a href="/accounting/reports/expenses-by-category?from_date={{ from_date }}&to_date={{ to_date }}&format=csv"
+           class="rs-btn rs-btn-ghost">Download CSV</a>
+      </div>
+    </form>
+  </div>
+
+  {% include "accounting/_reports_nav.html" %}
+
+  <div class="ac-report-grid">
+    <div class="rs-card ac-report-card">
+      <table class="ac-report-table">
+        <thead>
+          <tr>
+            <th class="ac-report-pad-left ac-col-code">Code</th>
+            <th>Category</th>
+            <th class="ac-report-pad-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in report.categories %}
+          <tr>
+            <td class="ac-report-pad-left"><span class="ac-code">{{ line.account_code }}</span></td>
+            <td>{{ line.account_name }}</td>
+            <td class="ac-report-pad-right">${{ "%.2f"|format(line.amount) }}</td>
+          </tr>
+          {% endfor %}
+          <tr class="ac-report-emphasis">
+            <td class="ac-report-pad-left" colspan="2">Total Expenses</td>
+            <td class="ac-report-pad-right">${{ "%.2f"|format(report.total_expenses) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

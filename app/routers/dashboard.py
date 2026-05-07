@@ -7,6 +7,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
+from ..accounting.routes import _owner_reimbursement_balance
 from ..db import DB_PATH
 from ..deps import render, BACKUP_DIR, get_db
 
@@ -38,7 +39,15 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         WHERE item_type='resale' AND qty_on_hand <= 0
         """
     ).fetchone()["c"]
-    return render("dashboard.html", request, resale_count=resale_count, unlisted=unlisted, low_qty=low_qty)
+    owner_reimbursement_balance = _owner_reimbursement_balance(conn)
+    return render(
+        "dashboard.html",
+        request,
+        resale_count=resale_count,
+        unlisted=unlisted,
+        low_qty=low_qty,
+        owner_reimbursement_balance=owner_reimbursement_balance,
+    )
 # =========================
 # ANCHOR: DASHBOARD_VIEW_END
 # =========================

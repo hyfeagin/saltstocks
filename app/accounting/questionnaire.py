@@ -224,14 +224,35 @@ GLOBAL_FLOW: list[Step] = [
 
     # ── 13. Sales tax collected ──────────────────────────────────────────────
     Step(
+        id="sales_tax_applies",
+        question="Was this sale taxable?",
+        input_type="multi_choice",
+        maps_to="sales_tax_applies",
+        options=[("yes", "Yes, sales tax was collected"), ("no", "No, this sale was tax-exempt")],
+        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_SALES_TAX,
+    ),
+    Step(
+        id="sales_tax_mode",
+        question="How should we figure out the sales tax amount?",
+        input_type="multi_choice",
+        maps_to="sales_tax_mode",
+        options=[("auto", "Auto-calculate from the default sales tax rate"), ("manual", "I'll enter the tax amount myself")],
+        shown_when=lambda a: (
+            _a(a, "template_id") in _TEMPLATES_WITH_SALES_TAX
+            and _a(a, "sales_tax_applies") == "yes"
+        ),
+    ),
+    Step(
         id="sales_tax_amount",
-        question="How much sales tax did you collect? (Optional)",
+        question="How much sales tax did you collect?",
         input_type="number",
         maps_to="sales_tax_amount",
-        optional=True,
-        default=Decimal("0"),
-        help_text="Leave blank if the sale was tax-exempt or you didn't collect tax.",
-        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_SALES_TAX,
+        help_text="Enter just the tax portion collected for this sale.",
+        shown_when=lambda a: (
+            _a(a, "template_id") in _TEMPLATES_WITH_SALES_TAX
+            and _a(a, "sales_tax_applies") == "yes"
+            and _a(a, "sales_tax_mode") == "manual"
+        ),
     ),
 
     # ── 14. Memo ─────────────────────────────────────────────────────────────
@@ -366,6 +387,10 @@ def build_answer_set(session: QuestionnaireSession) -> dict:
     # receipt_files must always be a list (never None)
     if not isinstance(d.get("receipt_files"), list):
         d["receipt_files"] = []
+
+    if template_id in _TEMPLATES_WITH_SALES_TAX and d.get("sales_tax_applies") != "yes":
+        d["sales_tax_amount"] = Decimal("0")
+        d["sales_tax_jurisdiction_id"] = None
 
     return d
 

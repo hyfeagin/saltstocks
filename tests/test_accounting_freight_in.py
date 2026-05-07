@@ -15,6 +15,12 @@ def _inventory_conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(
         """
+        CREATE TABLE sku_counters (
+          company TEXT NOT NULL,
+          code TEXT NOT NULL,
+          next_seq INTEGER NOT NULL DEFAULT 1,
+          PRIMARY KEY(company, code)
+        );
         CREATE TABLE items (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           item_type TEXT NOT NULL,
@@ -54,13 +60,18 @@ class FreightInAllocationTests(unittest.TestCase):
             )
             item_id = _apply_inventory_purchase(conn, req, ctx)
             row = conn.execute(
-                "SELECT name, qty_on_hand, unit_cost FROM items WHERE id=?",
+                "SELECT sku, name, qty_on_hand, unit_cost FROM items WHERE id=?",
                 (item_id,),
             ).fetchone()
+            self.assertEqual(row["sku"], "GV-MISC-000001")
             self.assertEqual(row["name"], "Plushie")
             self.assertEqual(row["qty_on_hand"], 12.0)
             self.assertEqual(row["unit_cost"], 1.25)
             self.assertEqual({ln.inventory_item_id for ln in req.lines}, {item_id})
+            counter = conn.execute(
+                "SELECT next_seq FROM sku_counters WHERE company='GV' AND code='MISC'"
+            ).fetchone()
+            self.assertEqual(counter["next_seq"], 2)
         finally:
             conn.close()
 
