@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..accounting.routes import _owner_reimbursement_balance
 from ..db import DB_PATH
-from ..deps import render, BACKUP_DIR, get_db
+from ..deps import render, BACKUP_DIR, BASE_DIR, get_db
 
 router = APIRouter()
 
@@ -63,6 +63,9 @@ def backup_now():
     dest = BACKUP_DIR / f"saltstocks_{ts}.db"
     if DB_PATH.exists():
         shutil.copy2(DB_PATH, dest)
+    receipts_src = BASE_DIR / "data" / "receipts"
+    if receipts_src.exists():
+        shutil.copytree(receipts_src, BACKUP_DIR / f"receipts_{ts}")
     return RedirectResponse(url="/", status_code=303)
 # =========================
 # ANCHOR: BACKUP_NOW_END
