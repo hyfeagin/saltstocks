@@ -60,7 +60,13 @@
   <button type="button" class="q-file-clear" onclick="clearFile()">Remove</button>
 </div>
 
-<input type="file" id="q-file-real" name="answer"
+<input type="hidden" name="answer" id="q-file-answer" value="" />
+
+<p class="q-help" style="margin-top: 14px; margin-bottom: 0;">
+  Attach a receipt if you have one, then press Continue. You can also leave this blank and add it later from the review screen.
+</p>
+
+<input type="file" id="q-file-real" name="receipt_preview_file"
        accept="image/*,application/pdf"
        style="display:none;"
        onchange="onFileChosen(this)" />
@@ -91,6 +97,7 @@
 
   window.onFileChosen = function(inp) {
     if (!inp.files.length) return;
+    document.getElementById("q-file-answer").value = "__selected__";
     document.getElementById("q-file-name").textContent = inp.files[0].name;
     document.getElementById("q-file-chosen").style.display = "flex";
     dz.style.display = "none";
@@ -98,6 +105,7 @@
 
   window.clearFile = function() {
     document.getElementById("q-file-real").value = "";
+    document.getElementById("q-file-answer").value = "";
     document.getElementById("q-file-chosen").style.display = "none";
     dz.style.display = "";
   };

@@ -126,7 +126,7 @@
       <div class="q-actions">
         {% if step.input_type != "multi_choice" %}
         <button type="submit" class="rs-btn rs-btn-primary">
-          {% if step.optional %}Skip →{% else %}Next →{% endif %}
+          {% if step.input_type == "file_upload" %}Continue →{% else %}Next →{% endif %}
         </button>
         {% endif %}
         {% if done > 0 %}

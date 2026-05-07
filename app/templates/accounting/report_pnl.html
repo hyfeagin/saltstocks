@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+<style>
+  .ac-report-grid {
+    display: grid;
+    gap: 16px;
+  }
+  .ac-report-table th:last-child,
+  .ac-report-table td:last-child {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    width: 140px;
+  }
+  .ac-report-subhead td {
+    padding-top: 16px;
+    font-size: var(--ss-fs-eyebrow);
+    font-weight: 700;
+    letter-spacing: var(--ss-tracking-eyebrow);
+    text-transform: uppercase;
+    color: var(--ss-muted);
+    border-bottom: none;
+  }
+  .ac-report-total td {
+    font-weight: 700;
+  }
+  .ac-report-emphasis td {
+    font-weight: 700;
+    font-size: 1rem;
+    border-top: 2px solid var(--ss-border);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>Profit &amp; Loss</h1>
+      <div class="ac-detail-value" style="color: var(--ss-muted); margin-top: 4px;">
+        {{ from_date }} through {{ to_date }}
+      </div>
+    </div>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← Entries</a>
+  </div>
+
+  <div class="rs-search-shell" style="margin-bottom: 16px;">
+    <form method="get" action="/accounting/reports/pnl" class="ac-filter-bar">
+      <div class="ac-filter-field">
+        <label>From</label>
+        <input type="date" name="from_date" value="{{ from_date }}" />
+      </div>
+      <div class="ac-filter-field">
+        <label>To</label>
+        <input type="date" name="to_date" value="{{ to_date }}" />
+      </div>
+      <div style="display:flex; gap:8px; align-self:flex-end; flex-wrap:wrap;">
+        <button class="rs-btn rs-btn-primary" type="submit">Run Report</button>
+        <a href="/accounting/reports/pnl?from_date={{ from_date }}&to_date={{ to_date }}&format=csv"
+           class="rs-btn rs-btn-ghost">Download CSV</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="ac-report-grid">
+    <div class="rs-card" style="padding: 0; overflow: hidden;">
+      <table class="ac-report-table">
+        <tbody>
+          <tr class="ac-report-subhead"><td colspan="2">Revenue</td></tr>
+          {% for line in report.revenue %}
+          <tr>
+            <td>{{ line.account_name }}</td>
+            <td>${{ "%.2f"|format(line.amount) }}</td>
+          </tr>
+          {% endfor %}
+          <tr class="ac-report-total">
+            <td>Total Revenue</td>
+            <td>${{ "%.2f"|format(report.total_revenue) }}</td>
+          </tr>
+
+          <tr class="ac-report-subhead"><td colspan="2">Cost of Goods Sold</td></tr>
+          {% for line in report.cogs %}
+          <tr>
+            <td>{{ line.account_name }}</td>
+            <td>(${{ "%.2f"|format(line.amount) }})</td>
+          </tr>
+          {% endfor %}
+          <tr class="ac-report-total">
+            <td>Total COGS</td>
+            <td>(${{ "%.2f"|format(report.total_cogs) }})</td>
+          </tr>
+          <tr class="ac-report-emphasis">
+            <td>Gross Profit</td>
+            <td>${{ "%.2f"|format(report.gross_profit) }}</td>
+          </tr>
+
+          <tr class="ac-report-subhead"><td colspan="2">Operating Expenses</td></tr>
+          {% for line in report.operating_expenses %}
+          <tr>
+            <td>{{ line.account_name }}</td>
+            <td>(${{ "%.2f"|format(line.amount) }})</td>
+          </tr>
+          {% endfor %}
+          <tr class="ac-report-total">
+            <td>Total Expenses</td>
+            <td>(${{ "%.2f"|format(report.total_expenses) }})</td>
+          </tr>
+          <tr class="ac-report-emphasis">
+            <td>Net Income</td>
+            <td>${{ "%.2f"|format(report.net_income) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}

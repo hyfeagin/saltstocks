@@ -1961,19 +1961,19 @@ Check items off as they are completed. Items are ordered so each one can be done
 
 **Wire templates to questionnaire flows**
 - [x] Wire `BUY_INVENTORY` — business funds inventory purchase (questions: type → amount → date → vendor → payment account → inventory link → freight-in → receipt)
-- [ ] Wire `BUY_INVENTORY_PERSONAL` — personal funds inventory purchase (same flow, skips payment account, credit = Owner Contributions)
-- [ ] Wire `BUY_EXPENSE_PERSONAL` — personal funds business expense (questions: type → expense category → amount → date → vendor → receipt)
-- [ ] Wire `REIMBURSE_OWNER` — business pays owner back (questions: amount ≤ current balance → source bank account → date → memo)
-- [ ] Wire `SELL_INVENTORY_CASH` + auto `COGS_RECOGNITION` — manual sale entry (deferred; most sales come from eBay import)
-- [ ] Wire expense templates: `BUSINESS_MEAL`, `TRAVEL_HOTEL`, `TRAVEL_TRANSPORT`, `OFFICE_SUPPLIES`, `SOFTWARE_SUBSCRIPTION`, `SHIPPING_OUTBOUND`, `EBAY_FEES`, `PAYMENT_PROCESSING_FEE`, `UTILITIES`, `RENT`, `PROFESSIONAL_SERVICES`, `BANK_FEE`
-- [ ] Wire `OWNER_CONTRIBUTION`, `OWNER_DRAW`, `PAY_CREDIT_CARD`, `SALES_TAX_REMITTED`, `OTHER_EXPENSE`, `OTHER_INCOME`
+- [x] Wire `BUY_INVENTORY_PERSONAL` — personal funds inventory purchase (same flow, skips payment account, credit = Owner Contributions)
+- [x] Wire `BUY_EXPENSE_PERSONAL` — personal funds business expense (questions: type → expense category → amount → date → vendor → receipt)
+- [x] Wire `REIMBURSE_OWNER` — business pays owner back (questions: amount ≤ current balance → source bank account → date → memo)
+- [x] Wire `SELL_INVENTORY_CASH` + auto `COGS_RECOGNITION` — manual sale entry (deferred; most sales come from eBay import)
+- [x] Wire expense templates: `BUSINESS_MEAL`, `TRAVEL_HOTEL`, `TRAVEL_TRANSPORT`, `OFFICE_SUPPLIES`, `SOFTWARE_SUBSCRIPTION`, `SHIPPING_OUTBOUND`, `EBAY_FEES`, `PAYMENT_PROCESSING_FEE`, `UTILITIES`, `RENT`, `PROFESSIONAL_SERVICES`, `BANK_FEE`
+- [x] Wire `OWNER_CONTRIBUTION`, `OWNER_DRAW`, `PAY_CREDIT_CARD`, `SALES_TAX_REMITTED`, `OTHER_EXPENSE`, `OTHER_INCOME`
 
 **Freight-in**
-- [ ] Add freight-in step to `BUY_INVENTORY` and `BUY_INVENTORY_PERSONAL` flows — shown after inventory link step; calls `allocate_freight_in()` before posting; updates per-unit cost on each inventory line
-- [ ] Show freight-allocated unit cost on Confirm screen summary ("each plushie costs $1.25 with shipping included")
+- [x] Add freight-in step to `BUY_INVENTORY` and `BUY_INVENTORY_PERSONAL` flows — shown after inventory link step; calls `allocate_freight_in()` before posting; updates per-unit cost on each inventory line
+- [x] Show freight-allocated unit cost on Confirm screen summary ("each plushie costs $1.25 with shipping included")
 
 **Replace manual form**
-- [ ] Update "Add Entry" button to link to `/accounting/entry/start` (questionnaire) instead of manual form; keep `/accounting/entry/manual` accessible for dev/admin use
+- [x] Update "Add Entry" button to link to `/accounting/entry/start` (questionnaire) instead of manual form; keep `/accounting/entry/manual` accessible for dev/admin use
 
 **Exit criteria checkpoint:** user can record any v1 transaction by clicking through the questionnaire, including multi-SKU inventory purchases with inbound shipping. The accounting UI is visually unified with the rest of Saltstocks.
 
@@ -1981,9 +1981,9 @@ Check items off as they are completed. Items are ordered so each one can be done
 
 ### Phase 3 — Reports
 
-- [ ] Create `app/accounting/reports.py` — SQL queries for P&L, Balance Sheet, Expense by Category, General Ledger
-- [ ] `GET /accounting/reports/pnl?from=&to=` — HTML report + "Download CSV" button; format matches §11.1
-- [ ] `GET /accounting/reports/balance-sheet?asof=` — HTML + CSV; §11.2
+- [x] Create `app/accounting/reports.py` — SQL queries for P&L, Balance Sheet, Expense by Category, General Ledger
+- [x] `GET /accounting/reports/pnl?from=&to=` — HTML report + "Download CSV" button; format matches §11.1
+- [x] `GET /accounting/reports/balance-sheet?asof=` — HTML + CSV; §11.2
 - [ ] `GET /accounting/reports/expenses-by-category?from=&to=` — HTML table + CSV; §11.3
 - [ ] `GET /accounting/reports/ledger/{account_id}?from=&to=` — chronological entry list with running balance; §11.5
 - [ ] `GET /accounting/reports/year-end-export/{year}` — ZIP bundle: P&L CSV, Expense CSV, General Ledger CSV, all receipts organized by month, SQLite snapshot; §11.6

@@ -4,7 +4,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Callable, Optional
 
 from app.accounting.exceptions import (
     EmptyEntryError,
@@ -47,13 +47,8 @@ class PostEntryRequest:
     notes: Optional[str] = None
 
 
-def post_entry(conn: sqlite3.Connection, req: PostEntryRequest) -> int:
-    """Validate and write a balanced journal entry + lines atomically.
-
-    Returns the new journal_entries.id.
-    Raises EmptyEntryError if all amounts are zero.
-    Raises UnbalancedEntryError if debits != credits.
-    """
+def _validate_post_entry(req: PostEntryRequest) -> None:
+    """Validate a balanced journal entry request before writing it."""
     total_debits = sum(ln.debit for ln in req.lines)
     total_credits = sum(ln.credit for ln in req.lines)
 
@@ -65,46 +60,79 @@ def post_entry(conn: sqlite3.Connection, req: PostEntryRequest) -> int:
             f"Debits ({total_debits}) do not equal credits ({total_credits})."
         )
 
-    with conn:
-        cur = conn.execute(
-            """
-            INSERT INTO journal_entries
-              (entry_date, description, template_id, total_amount,
-               created_by_method, vendor, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+
+def _insert_post_entry(conn: sqlite3.Connection, req: PostEntryRequest) -> int:
+    """Insert a validated journal entry and its lines without opening a transaction."""
+    cur = conn.execute(
+        """
+        INSERT INTO journal_entries
+          (entry_date, description, template_id, total_amount,
+           created_by_method, vendor, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            req.entry_date.isoformat(),
+            req.description,
+            req.template_id,
+            str(req.total_amount),
+            req.created_by_method,
+            req.vendor,
+            req.notes,
+        ),
+    )
+    entry_id = cur.lastrowid
+
+    conn.executemany(
+        """
+        INSERT INTO journal_lines
+          (entry_id, account_id, debit, credit, memo, inventory_item_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [
             (
-                req.entry_date.isoformat(),
-                req.description,
-                req.template_id,
-                str(req.total_amount),
-                req.created_by_method,
-                req.vendor,
-                req.notes,
-            ),
-        )
-        entry_id = cur.lastrowid
-
-        conn.executemany(
-            """
-            INSERT INTO journal_lines
-              (entry_id, account_id, debit, credit, memo, inventory_item_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    entry_id,
-                    ln.account_id,
-                    str(ln.debit),
-                    str(ln.credit),
-                    ln.memo,
-                    ln.inventory_item_id,
-                )
-                for ln in req.lines
-            ],
-        )
-
+                entry_id,
+                ln.account_id,
+                str(ln.debit),
+                str(ln.credit),
+                ln.memo,
+                ln.inventory_item_id,
+            )
+            for ln in req.lines
+        ],
+    )
     return entry_id
+
+
+def post_entry(conn: sqlite3.Connection, req: PostEntryRequest) -> int:
+    """Validate and write a balanced journal entry atomically.
+
+    Returns the new journal_entries.id.
+    Raises EmptyEntryError if all amounts are zero.
+    Raises UnbalancedEntryError if debits != credits.
+    """
+    return post_entries(conn, [req])[0]
+
+
+def post_entries(
+    conn: sqlite3.Connection,
+    requests: list[PostEntryRequest],
+    before_insert: Optional[Callable[[sqlite3.Connection], None]] = None,
+    after_insert: Optional[Callable[[sqlite3.Connection, list[int]], None]] = None,
+) -> list[int]:
+    """Validate and write multiple balanced entries in one transaction."""
+    if not requests:
+        return []
+
+    for req in requests:
+        _validate_post_entry(req)
+
+    with conn:
+        if before_insert is not None:
+            before_insert(conn)
+        entry_ids = [_insert_post_entry(conn, req) for req in requests]
+        if after_insert is not None:
+            after_insert(conn, entry_ids)
+    return entry_ids
 
 
 def void_entry(conn: sqlite3.Connection, entry_id: int, reason: str) -> int:

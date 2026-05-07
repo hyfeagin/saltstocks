@@ -227,6 +227,12 @@
         ${{ tas.freight_in_amount }}
       </span>
       {% endif %}
+      {% if inventory_unit_cost is not none and tas.freight_in_amount and tas.freight_in_amount > 0 %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Unit cost</span>
+        ${{ inventory_unit_cost }} each
+      </span>
+      {% endif %}
       {% if tas.sales_tax_amount and tas.sales_tax_amount > 0 %}
       <span class="ec-chip">
         <span class="ec-chip-label">Sales tax</span>

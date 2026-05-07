@@ -102,16 +102,57 @@ GLOBAL_FLOW: list[Step] = [
         options=_QUESTIONNAIRE_TEMPLATES,
     ),
 
-    # ── 2. Total amount ──────────────────────────────────────────────────────
+    # ── 2. Reimbursement amount (REIMBURSE_OWNER only) ─────────────────────
+    Step(
+        id="total_amount_reimburse_owner",
+        question="How much should the business reimburse you?",
+        input_type="number",
+        maps_to="total_amount",
+        shown_when=lambda a: _a(a, "template_id") == "REIMBURSE_OWNER",
+    ),
+
+    # ── 3. Expense category (BUY_EXPENSE_PERSONAL only) ─────────────────────
+    Step(
+        id="expense_category_account_id_personal",
+        question="What kind of expense was this?",
+        input_type="account_picker",
+        maps_to="expense_category_account_id",
+        account_filter="expense",
+        help_text="Pick the expense category that best describes this purchase.",
+        shown_when=lambda a: _a(a, "template_id") == "BUY_EXPENSE_PERSONAL",
+    ),
+
+    # ── 4. Sale inventory item (SELL_INVENTORY_CASH only) ──────────────────
+    Step(
+        id="inventory_link_sale",
+        question="Which inventory item did you sell?",
+        input_type="inventory_picker",
+        maps_to="inventory_link",
+        help_text="Choose the SKU sold and how many units were included in this sale.",
+        shown_when=lambda a: _a(a, "template_id") == "SELL_INVENTORY_CASH",
+    ),
+
+    # ── 5. Total amount ──────────────────────────────────────────────────────
     Step(
         id="total_amount",
         question="What was the total amount?",
         input_type="number",
         maps_to="total_amount",
         help_text="Enter the grand total including any sales tax you collected or paid.",
+        shown_when=lambda a: _a(a, "template_id") != "REIMBURSE_OWNER",
     ),
 
-    # ── 3. Date ──────────────────────────────────────────────────────────────
+    # ── 6. Reimbursement source account (REIMBURSE_OWNER only) ──────────────
+    Step(
+        id="payment_account_id_reimburse_owner",
+        question="Which bank account should reimburse you?",
+        input_type="account_picker",
+        maps_to="payment_account_id",
+        account_filter="bank",
+        shown_when=lambda a: _a(a, "template_id") == "REIMBURSE_OWNER",
+    ),
+
+    # ── 7. Date ──────────────────────────────────────────────────────────────
     Step(
         id="entry_date",
         question="When did this happen?",
@@ -120,7 +161,7 @@ GLOBAL_FLOW: list[Step] = [
         default="today",
     ),
 
-    # ── 4. Vendor ────────────────────────────────────────────────────────────
+    # ── 8. Vendor ────────────────────────────────────────────────────────────
     Step(
         id="vendor",
         question="Who did you buy from / sell to? (Optional)",
@@ -128,21 +169,24 @@ GLOBAL_FLOW: list[Step] = [
         maps_to="vendor",
         optional=True,
         shown_when=lambda a: _a(a, "template_id") not in (
-            "OWNER_CONTRIBUTION", "OWNER_DRAW", "COGS_RECOGNITION"
+            "OWNER_CONTRIBUTION", "OWNER_DRAW", "COGS_RECOGNITION", "REIMBURSE_OWNER"
         ),
     ),
 
-    # ── 5. Payment account (business-funded templates) ───────────────────────
+    # ── 9. Payment account (business-funded templates) ──────────────────────
     Step(
         id="payment_account_id",
         question="Which account did you pay from?",
         input_type="account_picker",
         maps_to="payment_account_id",
         account_filter="bank,credit_card,cash",
-        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_PAYMENT_ACCOUNT,
+        shown_when=lambda a: (
+            _a(a, "template_id") in _TEMPLATES_WITH_PAYMENT_ACCOUNT
+            and _a(a, "template_id") != "REIMBURSE_OWNER"
+        ),
     ),
 
-    # ── 6. Expense category (personal-expense templates) ─────────────────────
+    # ── 10. Expense category (remaining expense-category templates) ──────────
     Step(
         id="expense_category_account_id",
         question="What kind of expense was this?",
@@ -150,10 +194,13 @@ GLOBAL_FLOW: list[Step] = [
         maps_to="expense_category_account_id",
         account_filter="expense",
         help_text="Pick the expense category that best describes this purchase.",
-        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_EXPENSE_CATEGORY,
+        shown_when=lambda a: (
+            _a(a, "template_id") in _TEMPLATES_WITH_EXPENSE_CATEGORY
+            and _a(a, "template_id") != "BUY_EXPENSE_PERSONAL"
+        ),
     ),
 
-    # ── 7. Inventory link ────────────────────────────────────────────────────
+    # ── 11. Inventory link ───────────────────────────────────────────────────
     Step(
         id="inventory_link",
         question="Which inventory item does this purchase add to?",
@@ -163,7 +210,7 @@ GLOBAL_FLOW: list[Step] = [
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK,
     ),
 
-    # ── 8. Freight-in ────────────────────────────────────────────────────────
+    # ── 12. Freight-in ───────────────────────────────────────────────────────
     Step(
         id="freight_in_amount",
         question="Did the wholesaler charge you for shipping or handling?",
@@ -175,7 +222,7 @@ GLOBAL_FLOW: list[Step] = [
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_FREIGHT_IN,
     ),
 
-    # ── 9. Sales tax collected ───────────────────────────────────────────────
+    # ── 13. Sales tax collected ──────────────────────────────────────────────
     Step(
         id="sales_tax_amount",
         question="How much sales tax did you collect? (Optional)",
@@ -187,7 +234,7 @@ GLOBAL_FLOW: list[Step] = [
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_SALES_TAX,
     ),
 
-    # ── 10. Memo ─────────────────────────────────────────────────────────────
+    # ── 14. Memo ─────────────────────────────────────────────────────────────
     Step(
         id="memo",
         question="Any notes? (Optional)",
@@ -196,14 +243,14 @@ GLOBAL_FLOW: list[Step] = [
         optional=True,
     ),
 
-    # ── 11. Receipt ──────────────────────────────────────────────────────────
+    # ── 15. Receipt ──────────────────────────────────────────────────────────
     Step(
         id="receipt_files",
         question="Got a receipt? Attach it or skip.",
         input_type="file_upload",
         maps_to="receipt_files",
         optional=True,
-        shown_when=lambda a: _a(a, "template_id") not in ("COGS_RECOGNITION",),
+        shown_when=lambda a: _a(a, "template_id") not in ("COGS_RECOGNITION", "REIMBURSE_OWNER"),
     ),
 ]
 

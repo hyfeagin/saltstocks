@@ -62,10 +62,14 @@
 
 <input type="hidden" name="answer" id="q-inv-answer" value="" />
 
+{% set sale_only = step.id == 'inventory_link_sale' %}
+
+{% if not sale_only %}
 <div class="q-inv-tabs">
   <button type="button" class="q-inv-tab active" id="q-tab-link" onclick="switchTab('link')">Link existing</button>
   <button type="button" class="q-inv-tab" id="q-tab-new" onclick="switchTab('new')">Create new item</button>
 </div>
+{% endif %}
 
 {# ── Link existing panel ── #}
 <div class="q-inv-panel visible" id="q-panel-link">
@@ -83,10 +87,17 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="q-help" style="margin:0;">No inventory items yet — use "Create new item" to add one.</p>
+  <p class="q-help" style="margin:0;">
+    {% if sale_only %}
+    No inventory items with quantity on hand are available to sell yet.
+    {% else %}
+    No inventory items yet — use "Create new item" to add one.
+    {% endif %}
+  </p>
   {% endif %}
 </div>
 
+{% if not sale_only %}
 {# ── Create new panel ── #}
 <div class="q-inv-panel" id="q-panel-new">
   <div class="rs-field" style="margin-bottom: 10px;">
@@ -94,6 +105,7 @@
     <input type="text" id="q-new-name" placeholder="e.g. Funko Pop — Batman #234" />
   </div>
 </div>
+{% endif %}
 
 <div class="q-inv-qty">
   <label for="q-inv-qty-input">Quantity</label>
@@ -102,9 +114,11 @@
 
 <script>
 (function() {
+  var saleOnly = {{ "true" if sale_only else "false" }};
   var mode = "link";
 
   window.switchTab = function(tab) {
+    if (saleOnly) return;
     mode = tab;
     document.getElementById("q-panel-link").className = "q-inv-panel" + (tab === "link" ? " visible" : "");
     document.getElementById("q-panel-new").className  = "q-inv-panel" + (tab === "new"  ? " visible" : "");
@@ -140,13 +154,21 @@
       var radio = document.querySelector("[name='_item_radio']:checked");
       if (!radio) {
         e.preventDefault();
-        alert("Please select an inventory item or switch to "Create new item".");
+        alert(
+          saleOnly
+            ? "Please select an inventory item to sell."
+            : 'Please select an inventory item or switch to "Create new item".'
+        );
         return;
       }
       document.getElementById("q-inv-answer").value = JSON.stringify({
         mode: "link_existing", item_id: parseInt(radio.value), quantity: qty
       });
     } else {
+      if (saleOnly) {
+        e.preventDefault();
+        return;
+      }
       var name = document.getElementById("q-new-name").value.trim();
       if (!name) {
         e.preventDefault();
