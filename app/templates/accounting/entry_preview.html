@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+
+  <div class="ac-page-header">
+    <h1>Review Entry</h1>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">Cancel</a>
+  </div>
+
+  <div class="rs-card" style="padding: 18px 20px; margin-bottom: 16px;">
+    <h3 class="ac-section-title">Summary</h3>
+    <div class="ac-detail-grid">
+      <div>
+        <div class="ac-detail-label">Date</div>
+        <div class="ac-detail-value">{{ tas.entry_date }}</div>
+      </div>
+      <div>
+        <div class="ac-detail-label">Type</div>
+        <div class="ac-detail-value"><span class="ac-code">{{ tas.template_id }}</span></div>
+      </div>
+      <div>
+        <div class="ac-detail-label">Amount</div>
+        <div class="ac-detail-value"><b>${{ tas.total_amount }}</b></div>
+      </div>
+      {% if tas.vendor %}
+      <div>
+        <div class="ac-detail-label">Vendor</div>
+        <div class="ac-detail-value">{{ tas.vendor }}</div>
+      </div>
+      {% endif %}
+      {% if tas.memo %}
+      <div class="ac-detail-span-2">
+        <div class="ac-detail-label">Memo</div>
+        <div class="ac-detail-value" style="color: var(--ss-muted);">{{ tas.memo }}</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="rs-card" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
+    <div style="padding: 18px 20px 0;">
+      <h3 class="ac-section-title">Journal Lines</h3>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 90px; padding-left: 20px;">Account</th>
+          <th>Account Name</th>
+          <th style="width: 120px;" class="ac-table-num">Debit</th>
+          <th style="width: 120px;" class="ac-table-num">Credit</th>
+          <th style="padding-right: 20px;">Memo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ln in lines %}
+        <tr>
+          <td style="padding-left: 20px;"><span class="ac-code">{{ ln['account_code'] }}</span></td>
+          <td>{{ ln['account_name'] }}</td>
+          <td class="ac-table-num">
+            {% if ln['debit'] not in ('0', '0.00') %}<b>${{ ln['debit'] }}</b>
+            {% else %}<span style="color: var(--ss-muted);">—</span>{% endif %}
+          </td>
+          <td class="ac-table-num">
+            {% if ln['credit'] not in ('0', '0.00') %}<b>${{ ln['credit'] }}</b>
+            {% else %}<span style="color: var(--ss-muted);">—</span>{% endif %}
+          </td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help); padding-right: 20px;">{{ ln['memo'] or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight: 700; border-top: 2px solid var(--ss-border);">
+          <td colspan="2" style="text-align: right; color: var(--ss-muted); font-size: var(--ss-fs-help); padding-left: 20px;">Totals</td>
+          <td class="ac-table-num">${{ lines | sum(attribute='debit') | float | round(2) }}</td>
+          <td class="ac-table-num">${{ lines | sum(attribute='credit') | float | round(2) }}</td>
+          <td style="padding-right: 20px;"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="rs-card" style="padding: 18px 20px;">
+    <form method="post" action="/accounting/entry/confirm" enctype="multipart/form-data">
+      <input type="hidden" name="session_id" value="{{ session_id }}" />
+      <div style="margin-bottom: 14px;">
+        <label>Attach Receipt <span style="font-weight:400; color:var(--ss-muted);">(optional)</span></label>
+        <input type="file" name="receipt" accept="image/*,application/pdf" style="margin-top: 6px;" />
+      </div>
+      <div class="ac-form-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Confirm &amp; Post Entry</button>
+        <button class="rs-btn rs-btn-ghost" type="submit"
+                formaction="/accounting/entry/back-to-edit"
+                formenctype="application/x-www-form-urlencoded">← Edit Answers</button>
+      </div>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

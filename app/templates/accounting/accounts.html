@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+
+  <div class="ac-page-header">
+    <h1>Chart of Accounts</h1>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← Entries</a>
+  </div>
+
+  {% if saved %}
+  <div class="ac-banner ac-banner-success">
+    <b>Saved.</b> Account updated successfully.
+  </div>
+  {% endif %}
+  {% if error %}
+  <div class="ac-banner ac-banner-error">
+    <b>Error:</b> {{ error }}
+  </div>
+  {% endif %}
+
+  <div class="rs-card rs-form-shell" style="margin-bottom: 20px; padding: 20px 22px;">
+    <h3 class="ac-section-title">Add Custom Account</h3>
+    <form method="post" action="/accounting/accounts">
+      <div class="rs-form-grid" style="grid-template-columns: repeat(4, minmax(0,1fr));">
+        <div class="rs-field">
+          <label>Code</label>
+          <input name="code" placeholder="6200" required />
+        </div>
+        <div class="rs-field">
+          <label>Name</label>
+          <input name="name" placeholder="Advertising" required />
+        </div>
+        <div class="rs-field">
+          <label>Type</label>
+          <select name="account_type" required>
+            {% for t in account_types %}
+              <option value="{{ t }}">{{ type_labels[t] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="rs-field">
+          <label>Subtype <span style="font-weight:400; color:var(--ss-muted);">(optional)</span></label>
+          <input name="subtype" placeholder="e.g. bank, cogs" />
+        </div>
+      </div>
+      <div class="ac-form-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Add Account</button>
+      </div>
+    </form>
+  </div>
+
+  {% for type_key in account_types %}
+  {% set rows = groups[type_key] %}
+  <div class="rs-card" style="padding: 18px 20px; margin-bottom: 16px;">
+    <h3 class="ac-section-title">{{ type_labels[type_key] }}</h3>
+    {% if rows %}
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 80px;">Code</th>
+          <th>Name</th>
+          <th style="width: 130px;">Subtype</th>
+          <th style="width: 90px;">Status</th>
+          <th style="width: 130px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr class="{{ 'ac-row-voided' if not row['is_active'] else '' }}">
+          <td><span class="ac-code">{{ row['code'] }}</span></td>
+          <td>
+            <form class="ac-inline-form" method="post" action="/accounting/accounts/{{ row['id'] }}">
+              <input type="hidden" name="action" value="rename" />
+              <input name="name" value="{{ row['name'] }}" />
+              <button class="rs-btn rs-btn-ghost rs-btn-sm" type="submit" style="white-space:nowrap;">Save</button>
+            </form>
+          </td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help);">{{ row['subtype'] or '—' }}</td>
+          <td>
+            {% if row['is_active'] %}
+              <span class="ac-pill ac-pill-posted">Active</span>
+            {% else %}
+              <span class="ac-pill ac-pill-system">Inactive</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if row['is_system_protected'] %}
+              <span class="ac-pill ac-pill-system" title="System account — cannot be deactivated">System</span>
+            {% else %}
+              <form method="post" action="/accounting/accounts/{{ row['id'] }}" style="display:inline;">
+                <input type="hidden" name="action" value="toggle" />
+                <button class="rs-btn rs-btn-ghost rs-btn-sm" type="submit">
+                  {{ 'Deactivate' if row['is_active'] else 'Reactivate' }}
+                </button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="ac-empty">No {{ type_labels[type_key] | lower }} accounts yet.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+</div>
+{% endblock %}

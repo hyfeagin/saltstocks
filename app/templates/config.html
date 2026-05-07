@@ -8,17 +8,17 @@
   <p class="muted">Store OAuth credentials locally for pull-based order import.</p>
 
   {% if oauth_success %}
-  <div class="card" style="border-color:#89b48f;">
+  <div class="banner banner-success">
     <b>Connected!</b> eBay refresh token was saved successfully. You can now sync eBay orders.
   </div>
   {% elif saved_ebay %}
-  <div class="card" style="border-color:#89b48f;">
+  <div class="banner banner-success">
     <b>Saved.</b> eBay settings were updated.
   </div>
   {% endif %}
 
   {% if ebay_missing %}
-  <div class="card" style="border-color:#caa46a;">
+  <div class="banner banner-warn">
     <b>Missing required fields:</b>
     {% for field in ebay_missing %}
       <code>{{ field }}</code>{% if not loop.last %}, {% endif %}
@@ -92,7 +92,13 @@
           <form method="post" action="/config/categories/{{ cat['id'] }}/update" style="display:flex; gap:8px; align-items:center;">
             <input name="name" value="{{ cat['name'] }}" />
         </td>
-        <td>{{ 'Active' if cat['is_active']==1 else 'Inactive' }}</td>
+        <td>
+          {% if cat['is_active']==1 %}
+            <span class="pill pill-active">Active</span>
+          {% else %}
+            <span class="pill pill-inactive">Inactive</span>
+          {% endif %}
+        </td>
         <td>
             <button class="btn" type="submit">Save</button>
           </form>
@@ -176,7 +182,7 @@
           </form>
 
           <form method="post" action="/config/codes/{{ c['id'] }}/delete" style="display:inline;">
-            <button class="btn" type="submit" onclick="return confirm('Delete this code? This does not change existing SKUs, but you may lose dropdown options.')">Delete</button>
+            <button class="btn btn-danger" type="submit" onclick="return confirm('Delete this code? This does not change existing SKUs, but you may lose dropdown options.')">Delete</button>
           </form>
         </td>
       </tr>

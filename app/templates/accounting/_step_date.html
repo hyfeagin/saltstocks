@@ -1,0 +1,39 @@
+<style>
+  .q-date-quick { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .q-date-quick button {
+    padding: 6px 14px;
+    border: 1px solid var(--rs-border);
+    border-radius: 999px;
+    background: var(--rs-surface);
+    color: var(--rs-accent-strong);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .q-date-quick button:hover { background: var(--rs-surface-alt); }
+</style>
+
+<div class="rs-field">
+  <input type="date" id="q-date-input" name="answer"
+         value="{{ answers.get(step.maps_to, '') or '' }}"
+         {% if not step.optional %}required{% endif %}
+         autofocus />
+  <div class="q-date-quick">
+    <button type="button" onclick="setDate(0)">Today</button>
+    <button type="button" onclick="setDate(-1)">Yesterday</button>
+  </div>
+</div>
+
+<script>
+  function setDate(offsetDays) {
+    var d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    var iso = d.toISOString().slice(0, 10);
+    document.getElementById("q-date-input").value = iso;
+  }
+  // Default to today if blank
+  (function() {
+    var inp = document.getElementById("q-date-input");
+    if (!inp.value) setDate(0);
+  })();
+</script>

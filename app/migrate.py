@@ -293,6 +293,85 @@ def migrate():
                 accounts_seed,
             )
 
+        # ── Accounting: Journal Lines ─────────────────────────────────────────
+        if not table_exists(conn, "journal_lines"):
+            conn.execute("""
+            CREATE TABLE journal_lines (
+              id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+              entry_id           INTEGER NOT NULL
+                REFERENCES journal_entries(id) ON DELETE CASCADE,
+              account_id         INTEGER NOT NULL
+                REFERENCES accounts(id),
+              debit              TEXT NOT NULL DEFAULT '0',
+              credit             TEXT NOT NULL DEFAULT '0',
+              memo               TEXT,
+              inventory_item_id  INTEGER
+                REFERENCES items(id) ON DELETE SET NULL,
+              CHECK (
+                (CAST(debit AS REAL) > 0 AND CAST(credit AS REAL) = 0)
+                OR
+                (CAST(debit AS REAL) = 0 AND CAST(credit AS REAL) > 0)
+              )
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_lines_entry ON journal_lines(entry_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_journal_lines_item ON journal_lines(inventory_item_id)"
+            )
+
+        # ── Accounting: Receipts ─────────────────────────────────────────────
+        if not table_exists(conn, "receipts"):
+            conn.execute("""
+            CREATE TABLE receipts (
+              id                INTEGER PRIMARY KEY AUTOINCREMENT,
+              entry_id          INTEGER NOT NULL
+                REFERENCES journal_entries(id) ON DELETE CASCADE,
+              original_filename TEXT NOT NULL,
+              stored_path       TEXT NOT NULL UNIQUE,
+              mime_type         TEXT NOT NULL,
+              file_size_bytes   INTEGER NOT NULL,
+              sha256            TEXT NOT NULL,
+              uploaded_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_receipts_entry ON receipts(entry_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_receipts_sha256 ON receipts(sha256)"
+            )
+
+        # ── Accounting: Sales Tax Rates ──────────────────────────────────────
+        if not table_exists(conn, "sales_tax_rates"):
+            conn.execute("""
+            CREATE TABLE sales_tax_rates (
+              id               INTEGER PRIMARY KEY AUTOINCREMENT,
+              jurisdiction     TEXT NOT NULL,
+              rate             TEXT NOT NULL,
+              is_default       INTEGER NOT NULL DEFAULT 0,
+              effective_from   TEXT NOT NULL,
+              effective_to     TEXT
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_sales_tax_rates_default ON sales_tax_rates(is_default)"
+            )
+
+        # Seed NC rate if table is empty
+        if conn.execute("SELECT COUNT(*) FROM sales_tax_rates").fetchone()[0] == 0:
+            conn.execute(
+                """
+                INSERT INTO sales_tax_rates (jurisdiction, rate, is_default, effective_from)
+                VALUES (?, ?, 1, ?)
+                """,
+                ("North Carolina", "0.0475", "2024-01-01"),
+            )
+
         # ── Accounting: Journal Entries ───────────────────────────────────────
         if not table_exists(conn, "journal_entries"):
             conn.execute("""
@@ -321,6 +400,17 @@ def migrate():
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_journal_entries_void ON journal_entries(is_void)"
             )
+
+        # ── Accounting: Questionnaire Sessions ───────────────────────────────
+        if not table_exists(conn, "questionnaire_sessions"):
+            conn.execute("""
+            CREATE TABLE questionnaire_sessions (
+              session_id  TEXT PRIMARY KEY,
+              data        TEXT NOT NULL,
+              created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
 
         # Backfill company default for existing rows:
         # resale -> GV, material -> UM (reasonable default)

@@ -1,0 +1,105 @@
+<style>
+  .q-dropzone {
+    border: 2px dashed var(--rs-border);
+    border-radius: 18px;
+    padding: 40px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    background: var(--rs-surface);
+  }
+  .q-dropzone.drag-over {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt);
+  }
+  .q-dropzone-icon {
+    font-size: 2rem;
+    margin-bottom: 10px;
+    opacity: 0.5;
+  }
+  .q-dropzone-label {
+    font-size: 1rem;
+    color: var(--rs-muted);
+    margin-bottom: 6px;
+  }
+  .q-dropzone-sub {
+    font-size: 0.82rem;
+    color: var(--rs-muted);
+  }
+  .q-file-chosen {
+    display: none;
+    margin-top: 14px;
+    padding: 10px 14px;
+    border: 1px solid var(--rs-border);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    color: var(--rs-text);
+    background: var(--rs-surface-alt);
+    align-items: center;
+    gap: 10px;
+  }
+  .q-file-clear {
+    margin-left: auto;
+    border: none;
+    background: none;
+    color: var(--rs-danger);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+</style>
+
+<div id="q-dz" class="q-dropzone" onclick="document.getElementById('q-file-real').click()">
+  <div class="q-dropzone-icon">📎</div>
+  <div class="q-dropzone-label">Drop a file here, or click to browse</div>
+  <div class="q-dropzone-sub">JPG, PNG, or PDF · max 10 MB</div>
+</div>
+
+<div class="q-file-chosen" id="q-file-chosen">
+  <span id="q-file-name"></span>
+  <button type="button" class="q-file-clear" onclick="clearFile()">Remove</button>
+</div>
+
+<input type="file" id="q-file-real" name="answer"
+       accept="image/*,application/pdf"
+       style="display:none;"
+       onchange="onFileChosen(this)" />
+
+<script>
+(function() {
+  var dz = document.getElementById("q-dz");
+
+  dz.addEventListener("dragover", function(e) {
+    e.preventDefault(); dz.classList.add("drag-over");
+  });
+  dz.addEventListener("dragleave", function() {
+    dz.classList.remove("drag-over");
+  });
+  dz.addEventListener("drop", function(e) {
+    e.preventDefault();
+    dz.classList.remove("drag-over");
+    var files = e.dataTransfer.files;
+    if (files.length) {
+      var inp = document.getElementById("q-file-real");
+      // DataTransfer lets us set files on the input
+      var dt = new DataTransfer();
+      dt.items.add(files[0]);
+      inp.files = dt.files;
+      onFileChosen(inp);
+    }
+  });
+
+  window.onFileChosen = function(inp) {
+    if (!inp.files.length) return;
+    document.getElementById("q-file-name").textContent = inp.files[0].name;
+    document.getElementById("q-file-chosen").style.display = "flex";
+    dz.style.display = "none";
+  };
+
+  window.clearFile = function() {
+    document.getElementById("q-file-real").value = "";
+    document.getElementById("q-file-chosen").style.display = "none";
+    dz.style.display = "";
+  };
+})();
+</script>

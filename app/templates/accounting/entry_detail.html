@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+
+  <div class="ac-page-header">
+    <h1>Entry #{{ entry['id'] }}</h1>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← All Entries</a>
+  </div>
+
+  {% if voided %}
+  <div class="ac-banner ac-banner-success">
+    <b>Voided.</b> A reversing entry has been created and both entries are marked void.
+  </div>
+  {% endif %}
+  {% if warn == 'duplicate' %}
+  <div class="ac-banner ac-banner-warn">
+    <b>Note:</b> This file's SHA-256 matches an existing receipt — it may be a duplicate, but it was saved anyway.
+  </div>
+  {% endif %}
+  {% if error %}
+  <div class="ac-banner ac-banner-error">
+    <b>Error:</b> {{ error }}
+  </div>
+  {% endif %}
+
+  {% if entry['is_void'] %}
+  <div class="ac-void-card">
+    <h3>This entry is voided.</h3>
+    <p style="margin: 0; font-size: var(--ss-fs-help);">
+      {% if entry['void_reason'] %}Reason: {{ entry['void_reason'] }}{% endif %}
+      {% if entry['void_at'] %} &mdash; <span style="color: var(--ss-muted);">{{ entry['void_at'] }}</span>{% endif %}
+    </p>
+  </div>
+  {% endif %}
+
+  {# ── Entry details ── #}
+  <div class="rs-card" style="padding: 20px 22px; margin-bottom: 16px;">
+    <h3 class="ac-section-title">Entry Details</h3>
+    <div class="ac-detail-grid">
+      <div>
+        <div class="ac-detail-label">Date</div>
+        <div class="ac-detail-value">{{ entry['entry_date'] }}</div>
+      </div>
+      <div>
+        <div class="ac-detail-label">Template</div>
+        <div class="ac-detail-value"><span class="ac-code">{{ entry['template_id'] }}</span></div>
+      </div>
+      <div>
+        <div class="ac-detail-label">Amount</div>
+        <div class="ac-detail-value"><b>${{ entry['total_amount'] }}</b></div>
+      </div>
+      <div>
+        <div class="ac-detail-label">Method</div>
+        <div class="ac-detail-value" style="color: var(--ss-muted);">{{ entry['created_by_method'] }}</div>
+      </div>
+      <div class="ac-detail-span-2">
+        <div class="ac-detail-label">Description</div>
+        <div class="ac-detail-value">{{ entry['description'] }}</div>
+      </div>
+      {% if entry['vendor'] %}
+      <div>
+        <div class="ac-detail-label">Vendor</div>
+        <div class="ac-detail-value">{{ entry['vendor'] }}</div>
+      </div>
+      {% endif %}
+      {% if entry['notes'] %}
+      <div class="ac-detail-span-2">
+        <div class="ac-detail-label">Notes</div>
+        <div class="ac-detail-value" style="color: var(--ss-muted);">{{ entry['notes'] }}</div>
+      </div>
+      {% endif %}
+      <div>
+        <div class="ac-detail-label">Created</div>
+        <div class="ac-detail-value" style="color: var(--ss-muted); font-size: var(--ss-fs-help);">{{ entry['created_at'] }}</div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Journal lines ── #}
+  <div class="rs-card" style="padding: 0; overflow: hidden; margin-bottom: 16px;">
+    <div style="padding: 18px 20px 0;">
+      <h3 class="ac-section-title">Journal Lines</h3>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 90px; padding-left: 20px;">Account</th>
+          <th>Account Name</th>
+          <th style="width: 120px;" class="ac-table-num">Debit</th>
+          <th style="width: 120px;" class="ac-table-num">Credit</th>
+          <th style="padding-right: 20px;">Memo</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ln in lines %}
+        <tr>
+          <td style="padding-left: 20px;"><span class="ac-code">{{ ln['account_code'] }}</span></td>
+          <td>{{ ln['account_name'] }}</td>
+          <td class="ac-table-num">
+            {% if ln['debit'] != '0' %}
+              <b>${{ ln['debit'] }}</b>
+            {% else %}
+              <span style="color: var(--ss-muted);">—</span>
+            {% endif %}
+          </td>
+          <td class="ac-table-num">
+            {% if ln['credit'] != '0' %}
+              <b>${{ ln['credit'] }}</b>
+            {% else %}
+              <span style="color: var(--ss-muted);">—</span>
+            {% endif %}
+          </td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help); padding-right: 20px;">{{ ln['memo'] or '' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight: 700; border-top: 2px solid var(--ss-border);">
+          <td colspan="2" style="text-align: right; color: var(--ss-muted); font-size: var(--ss-fs-help); padding-left: 20px;">Totals</td>
+          <td class="ac-table-num">${{ lines | sum(attribute='debit') | float | round(2) }}</td>
+          <td class="ac-table-num">${{ lines | sum(attribute='credit') | float | round(2) }}</td>
+          <td style="padding-right: 20px;"></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  {# ── Receipts ── #}
+  <div class="rs-card" style="padding: 18px 20px; margin-bottom: 16px;">
+    <h3 class="ac-section-title">Receipts</h3>
+
+    {% if receipts %}
+    <table style="margin-bottom: 18px;">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Type</th>
+          <th style="width: 90px;">Size</th>
+          <th style="width: 160px;">Uploaded</th>
+          <th style="width: 90px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in receipts %}
+        <tr>
+          <td>{{ r['original_filename'] }}</td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help);">{{ r['mime_type'] }}</td>
+          <td style="font-size: var(--ss-fs-help);">{{ (r['file_size_bytes'] / 1024) | round(1) }} KB</td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help);">{{ r['uploaded_at'] }}</td>
+          <td><a href="/accounting/receipts/{{ r['id'] }}/file"
+                 style="color: var(--ss-accent); font-weight: 600; font-size: var(--ss-fs-help); text-decoration: none;">Download</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="ac-empty" style="margin-bottom: 14px;">No receipts attached yet.</p>
+    {% endif %}
+
+    <form method="post" action="/accounting/entries/{{ entry['id'] }}/receipts"
+          enctype="multipart/form-data"
+          style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+      <input type="file" name="file" accept="image/*,application/pdf" required
+             style="flex: 1; min-width: 180px; width: auto;" />
+      <button class="rs-btn rs-btn-ghost" type="submit">Attach Receipt</button>
+    </form>
+  </div>
+
+  {# ── Void entry ── #}
+  {% if not entry['is_void'] %}
+  <div class="rs-card" style="padding: 18px 20px; border-color: var(--ss-danger);">
+    <h3 class="ac-section-title" style="color: var(--ss-danger);">Void This Entry</h3>
+    <p style="color: var(--ss-muted); font-size: var(--ss-fs-help); margin: 0 0 14px;">
+      Creates a reversing entry (debits ↔ credits) and marks both as void. This cannot be undone.
+    </p>
+    <form method="post" action="/accounting/entries/{{ entry['id'] }}/void"
+          onsubmit="return confirm('Void this entry? A reversing entry will be created and both will be marked void.');">
+      <div style="display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap;">
+        <div class="rs-field" style="flex: 1; min-width: 220px;">
+          <label>Reason <span style="font-weight:400; color:var(--ss-muted);">(required)</span></label>
+          <input name="void_reason" placeholder="e.g. Entered wrong amount" required />
+        </div>
+        <button class="rs-btn rs-btn-danger" type="submit">
+          Void Entry
+        </button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

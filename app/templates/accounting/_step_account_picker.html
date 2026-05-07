@@ -1,0 +1,74 @@
+<style>
+  .q-account-select {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .q-account-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border: 1px solid var(--rs-border);
+    border-radius: 14px;
+    background: var(--rs-surface);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .q-account-label:hover {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt);
+  }
+  .q-account-label.selected {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt);
+  }
+  .q-account-label input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    accent-color: var(--rs-accent);
+  }
+  .q-account-code {
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    font-size: 0.82rem;
+    background: var(--rs-surface-deep);
+    border-radius: 6px;
+    padding: 2px 7px;
+    color: var(--rs-accent-strong);
+    white-space: nowrap;
+  }
+  .q-account-name { font-size: 0.97rem; }
+  .q-account-fallback { display: none; }
+</style>
+
+{% set current_val = answers.get(step.maps_to) | int if answers.get(step.maps_to) else None %}
+
+{% if accounts|length <= 12 %}
+{# Tappable radio list for small sets #}
+<div class="q-account-select">
+  {% for acct in accounts %}
+  <label class="q-account-label {% if current_val == acct['id'] %}selected{% endif %}">
+    <input type="radio" name="answer" value="{{ acct['id'] }}"
+           {% if current_val == acct['id'] %}checked{% endif %}
+           onchange="this.form.submit()" />
+    <span class="q-account-code">{{ acct['code'] }}</span>
+    <span class="q-account-name">{{ acct['name'] }}</span>
+  </label>
+  {% endfor %}
+</div>
+
+{% else %}
+{# Dropdown fallback for larger account lists #}
+<div class="rs-field">
+  <select name="answer" {% if not step.optional %}required{% endif %}>
+    <option value="">— choose an account —</option>
+    {% for acct in accounts %}
+    <option value="{{ acct['id'] }}" {% if current_val == acct['id'] %}selected{% endif %}>
+      [{{ acct['code'] }}] {{ acct['name'] }}
+    </option>
+    {% endfor %}
+  </select>
+</div>
+{% endif %}

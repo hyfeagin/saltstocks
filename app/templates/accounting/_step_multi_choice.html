@@ -1,0 +1,43 @@
+<style>
+  .q-choice-list { display: flex; flex-direction: column; gap: 8px; }
+  .q-choice-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border: 1px solid var(--rs-border);
+    border-radius: 14px;
+    background: var(--rs-surface);
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--rs-text);
+    transition: border-color 0.15s ease, background 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .q-choice-label:hover {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt);
+  }
+  .q-choice-label.selected {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt);
+  }
+  .q-choice-label input[type="radio"] {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    accent-color: var(--rs-accent);
+  }
+</style>
+
+<div class="q-choice-list">
+  {% set current_val = answers.get(step.maps_to) %}
+  {% for value, label in step.options %}
+  <label class="q-choice-label {% if current_val == value %}selected{% endif %}">
+    <input type="radio" name="answer" value="{{ value }}"
+           {% if current_val == value %}checked{% endif %}
+           onchange="this.form.submit()" />
+    {{ label }}
+  </label>
+  {% endfor %}
+</div>

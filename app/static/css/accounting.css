@@ -1,0 +1,205 @@
+/* SaltStocks Accounting — shared component layer
+   Requires tokens.css (via base.html) and resale.css.
+*/
+
+/* ── Page shell ──────────────────────────────────────────────────────── */
+.ac-page {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.ac-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.ac-page-header h1 {
+  margin: 0;
+  font-size: var(--ss-fs-h1);
+  line-height: var(--ss-lh-tight);
+  letter-spacing: var(--ss-tracking-display);
+  color: var(--ss-text);
+}
+
+/* ── Semantic banner cards ───────────────────────────────────────────── */
+.ac-banner {
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-r-card);
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  font-size: var(--ss-fs-body);
+}
+
+.ac-banner-success {
+  border-color: var(--ss-accent);
+  background: var(--ss-status-listed-bg);
+  color: var(--ss-accent-strong);
+}
+
+.ac-banner-error {
+  border-color: var(--ss-danger);
+  background: var(--ss-danger-bg);
+  color: var(--ss-danger);
+}
+
+.ac-banner-warn {
+  border-color: var(--ss-warn);
+  background: var(--ss-warn-bg);
+  color: var(--ss-warn);
+}
+
+/* ── Void-entry callout (heavier than a banner) ──────────────────────── */
+.ac-void-card {
+  border: 1px solid var(--ss-danger);
+  border-radius: var(--ss-r-card);
+  background: var(--ss-danger-bg);
+  padding: 18px 20px;
+  margin-bottom: 16px;
+  color: var(--ss-danger);
+}
+
+.ac-void-card h3 {
+  margin: 0 0 6px;
+  color: var(--ss-danger);
+  font-size: var(--ss-fs-h3);
+}
+
+/* ── Status pills ────────────────────────────────────────────────────── */
+.ac-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--ss-r-pill);
+  font-size: var(--ss-fs-pill);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ac-pill-posted {
+  background: var(--ss-status-listed-bg);
+  color: var(--ss-status-listed-fg);
+}
+
+.ac-pill-void {
+  background: var(--ss-danger-bg);
+  color: var(--ss-danger);
+}
+
+.ac-pill-system {
+  background: var(--ss-surface-deep);
+  color: var(--ss-muted);
+}
+
+/* ── Code chip (monospace in a pill background) ──────────────────────── */
+.ac-code {
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-fs-eyebrow);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background: var(--ss-surface-deep);
+  color: var(--ss-accent-strong);
+  border-radius: 6px;
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+/* ── Detail grid (label / value pairs) ───────────────────────────────── */
+.ac-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+}
+
+.ac-detail-label {
+  font-size: var(--ss-fs-eyebrow);
+  font-weight: 700;
+  letter-spacing: var(--ss-tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--ss-muted);
+  margin-bottom: 3px;
+}
+
+.ac-detail-value {
+  font-size: var(--ss-fs-body);
+  color: var(--ss-text);
+}
+
+.ac-detail-span-2 {
+  grid-column: 1 / span 2;
+}
+
+/* ── Card section title ──────────────────────────────────────────────── */
+.ac-section-title {
+  margin: 0 0 14px;
+  font-size: var(--ss-fs-h3);
+  color: var(--ss-accent-strong);
+}
+
+/* ── Separator ───────────────────────────────────────────────────────── */
+.ac-sep {
+  border: none;
+  border-top: 1px solid var(--ss-border);
+  margin: 18px 0;
+}
+
+/* ── Table helpers ───────────────────────────────────────────────────── */
+.ac-table-num { text-align: right; }
+.ac-row-voided { opacity: 0.5; }
+
+/* ── Form actions row ────────────────────────────────────────────────── */
+.ac-form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 20px;
+}
+
+/* ── Inline form (rename / toggle in table row) ──────────────────────── */
+.ac-inline-form {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ac-inline-form input {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Filter bar ──────────────────────────────────────────────────────── */
+.ac-filter-bar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: flex-end;
+}
+
+.ac-filter-field {
+  display: grid;
+  gap: 4px;
+}
+
+.ac-filter-field input,
+.ac-filter-field select {
+  width: auto;
+  min-width: 130px;
+}
+
+/* ── Amount — right-aligned, bold ────────────────────────────────────── */
+.ac-amount {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────── */
+.ac-empty {
+  color: var(--ss-muted);
+  font-size: var(--ss-fs-help);
+  padding: 8px 0;
+}

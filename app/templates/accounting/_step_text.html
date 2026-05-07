@@ -1,0 +1,6 @@
+<div class="rs-field">
+  <input type="text" name="answer"
+         value="{{ answers.get(step.maps_to, '') or '' }}"
+         {% if not step.optional %}required{% endif %}
+         autofocus />
+</div>

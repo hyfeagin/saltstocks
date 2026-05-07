@@ -4,7 +4,7 @@
 <p class="muted">Preview first, then apply deductions. SKU matching requires Saltstocks <code>items.sku</code> to match eBay SKU/Custom Label.</p>
 
 {% if missing_credentials %}
-<div class="card" style="border-color:#caa46a;">
+<div class="banner banner-warn">
   <b>Missing credentials:</b>
   {% for field in missing_credentials %}
     <code>{{ field }}</code>{% if not loop.last %}, {% endif %}
@@ -14,19 +14,19 @@
 {% endif %}
 
 {% if error_message %}
-<div class="card" style="border-color:#d98c8c;">
+<div class="banner banner-error">
   <b>Error:</b> {{ error_message }}
 </div>
 {% endif %}
 
 {% if success_message %}
-<div class="card" style="border-color:#89b48f;">
+<div class="banner banner-success">
   <b>Success:</b> {{ success_message }}
 </div>
 {% endif %}
 
 {% if status_note %}
-<div class="card" style="border-color:#caa46a;">
+<div class="banner banner-warn">
   <b>Note:</b> {{ status_note }}
 </div>
 {% endif %}
@@ -107,7 +107,19 @@
         <td>{{ "%.2f"|format(row.qty_sold) }}</td>
         <td>{% if row.current_qty_on_hand is not none %}{{ "%.2f"|format(row.current_qty_on_hand) }}{% else %}-{% endif %}</td>
         <td>{% if row.projected_qty_on_hand is not none %}{{ "%.2f"|format(row.projected_qty_on_hand) }}{% else %}-{% endif %}</td>
-        <td>{{ row.status }}</td>
+        <td>
+          {% if row.status == 'matched' %}
+            <span class="pill pill-active">matched</span>
+          {% elif row.status == 'unmatched' %}
+            <span class="pill pill-error">unmatched</span>
+          {% elif row.status == 'already_imported' %}
+            <span class="pill pill-inactive">imported</span>
+          {% elif row.status == 'clamped' %}
+            <span class="pill pill-warn">clamped</span>
+          {% else %}
+            <span class="pill">{{ row.status }}</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

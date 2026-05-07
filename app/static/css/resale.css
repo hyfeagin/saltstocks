@@ -1,26 +1,4 @@
-:root {
-  --rs-bg: #f4faf8;
-  --rs-surface: #ffffff;
-  --rs-surface-alt: #edf7f3;
-  --rs-surface-deep: #dff0e8;
-  --rs-border: #c7ddd3;
-  --rs-border-strong: #8eb9a7;
-  --rs-text: #18322d;
-  --rs-muted: #5e7d73;
-  --rs-accent: #2f8f73;
-  --rs-accent-strong: #236d57;
-  --rs-warn: #8c6d1f;
-  --rs-danger: #8b3f49;
-  --rs-shadow: 0 12px 24px rgba(24, 50, 45, 0.08);
-  --rs-radius: 18px;
-}
-
-body {
-  background:
-    radial-gradient(circle at top right, rgba(47, 143, 115, 0.08), transparent 24rem),
-    linear-gradient(180deg, #f8fcfa 0%, #eef6f2 100%);
-  color: var(--rs-text);
-}
+/* tokens.css (loaded globally via base.html) defines all --rs-* and --ss-* vars */
 
 .rs-page {
   max-width: 1380px;
@@ -37,9 +15,9 @@ body {
 
 .rs-page-header h1 {
   margin: 0;
-  font-size: 2rem;
-  line-height: 1;
-  letter-spacing: -0.03em;
+  font-size: var(--ss-fs-h1);
+  line-height: var(--ss-lh-tight);
+  letter-spacing: var(--ss-tracking-display);
 }
 
 .rs-subtitle {
@@ -127,7 +105,7 @@ body {
   justify-content: center;
   min-height: 42px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   border: 1px solid var(--rs-border-strong);
   background: var(--rs-surface);
   color: var(--rs-accent-strong);
@@ -146,9 +124,21 @@ body {
   background: var(--rs-surface-alt);
 }
 
+.rs-btn-danger {
+  border-color: var(--ss-danger);
+  color: var(--ss-danger);
+  background: var(--ss-danger-bg);
+}
+
+.rs-btn-sm {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: var(--ss-fs-help);
+}
+
 .rs-tab {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   padding: 10px 16px;
   background: transparent;
   color: var(--rs-muted);
@@ -176,7 +166,7 @@ body {
   gap: 6px;
   padding: 4px;
   border: 1px solid var(--rs-border);
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   background: var(--rs-surface-alt);
 }
 
@@ -184,7 +174,7 @@ body {
   border: 0;
   background: transparent;
   color: var(--rs-muted);
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   padding: 8px 12px;
   cursor: pointer;
   font-weight: 700;
@@ -313,7 +303,7 @@ body {
   display: inline-flex;
   align-items: center;
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   font-size: 0.82rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -498,7 +488,7 @@ body {
 
 .rs-form-banner code {
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   background: var(--rs-surface-deep);
   color: var(--rs-accent-strong);
   font-size: 0.9rem;
@@ -564,7 +554,7 @@ body {
   color: var(--rs-accent-strong);
   background: var(--rs-surface-deep);
   border: 1px solid var(--rs-border);
-  border-radius: 999px;
+  border-radius: var(--ss-r-pill);
   padding: 3px 10px;
 }
 

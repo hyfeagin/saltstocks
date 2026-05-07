@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+
+  <div class="ac-page-header">
+    <div>
+      <h1>Manual Journal Entry</h1>
+      <p style="margin: 4px 0 0; font-size: var(--ss-fs-help); color: var(--ss-muted);">
+        Developer harness — pick a template, fill in the amounts, and the posting engine builds the debit/credit lines.
+      </p>
+    </div>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← Entries</a>
+  </div>
+
+  {% if error %}
+  <div class="ac-banner ac-banner-error">
+    <b>Error:</b> {{ error }}
+  </div>
+  {% endif %}
+
+  <div class="rs-card rs-form-shell" style="margin-bottom: 20px;">
+    <form method="post" action="/accounting/entry/manual">
+
+      <div class="rs-form-grid">
+        <div class="rs-field">
+          <label>Template <span style="font-weight:400; color:var(--ss-muted);">(required)</span></label>
+          <select name="template_id" required>
+            {% for t in templates %}
+              <option value="{{ t.id }}">{{ t.id }} — {{ t.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="rs-field">
+          <label>Entry Date <span style="font-weight:400; color:var(--ss-muted);">(required)</span></label>
+          <input type="date" name="entry_date" value="{{ today }}" required />
+        </div>
+
+        <div class="rs-field">
+          <label>Total Amount <span style="font-weight:400; color:var(--ss-muted);">(required)</span></label>
+          <input type="number" step="0.01" min="0.01" name="total_amount" placeholder="0.00" required />
+        </div>
+
+        <div class="rs-field">
+          <label>Vendor <span style="font-weight:400; color:var(--ss-muted);">(optional)</span></label>
+          <input name="vendor" placeholder="Amazon, eBay, Target…" />
+        </div>
+
+        <div class="rs-field rs-field-span-2">
+          <label>Description <span style="font-weight:400; color:var(--ss-muted);">(auto-filled from template if blank)</span></label>
+          <input name="description" placeholder="e.g. Bought 6 Funko Pops at Target" />
+        </div>
+
+        <div class="rs-field rs-field-span-2">
+          <label>Memo <span style="font-weight:400; color:var(--ss-muted);">(appears on each journal line)</span></label>
+          <input name="memo" placeholder="Optional line-level note" />
+        </div>
+
+        <div class="rs-field rs-field-span-3">
+          <label>Notes <span style="font-weight:400; color:var(--ss-muted);">(internal, not on lines)</span></label>
+          <textarea name="notes" rows="2" placeholder="Any extra context"></textarea>
+        </div>
+      </div>
+
+      <hr class="ac-sep" />
+
+      <p style="font-size: var(--ss-fs-help); color: var(--ss-muted); margin: 0 0 14px;">
+        <b>Account fields</b> — only fill the ones your chosen template needs.
+        Templates with a fixed credit (e.g. <span class="ac-code">BUY_INVENTORY_PERSONAL</span>) don't need a payment account.
+        <span class="ac-code">OTHER_EXPENSE</span> needs both.
+      </p>
+
+      <div class="rs-form-grid">
+        <div class="rs-field">
+          <label>Payment Account
+            <span style="font-weight:400; color:var(--ss-muted);">(cash / bank / card used)</span>
+          </label>
+          <select name="payment_account_id">
+            <option value="">— none —</option>
+            {% set ns = namespace(last_type="") %}
+            {% for a in accounts %}
+              {% if a['type'] != ns.last_type %}
+                {% if ns.last_type != "" %}</optgroup>{% endif %}
+                <optgroup label="{{ a['type'] | capitalize }}">
+                {% set ns.last_type = a['type'] %}
+              {% endif %}
+              <option value="{{ a['id'] }}">{{ a['code'] }} — {{ a['name'] }}</option>
+            {% endfor %}
+            {% if ns.last_type != "" %}</optgroup>{% endif %}
+          </select>
+        </div>
+
+        <div class="rs-field">
+          <label>Expense Category
+            <span style="font-weight:400; color:var(--ss-muted);">(BUY_EXPENSE_PERSONAL / OTHER_EXPENSE)</span>
+          </label>
+          <select name="expense_category_account_id">
+            <option value="">— none —</option>
+            {% for a in accounts if a['type'] == 'expense' %}
+              <option value="{{ a['id'] }}">{{ a['code'] }} — {{ a['name'] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="rs-field">
+          <label>Sales Tax Amount
+            <span style="font-weight:400; color:var(--ss-muted);">(SELL_INVENTORY_CASH only)</span>
+          </label>
+          <input type="number" step="0.01" min="0" name="sales_tax_amount" placeholder="0.00" />
+        </div>
+      </div>
+
+      <div class="ac-form-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Post Entry</button>
+        <a href="/accounting/entries" class="rs-btn rs-btn-ghost">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="rs-card" style="padding: 18px 20px;">
+    <h3 class="ac-section-title">Template Quick Reference</h3>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 220px;">Template</th>
+          <th>Debit</th>
+          <th>Credit</th>
+          <th>Required account fields</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in templates %}
+        <tr>
+          <td><span class="ac-code">{{ t.id }}</span></td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help);">{{ t.debit_account_code or '(dynamic)' }}</td>
+          <td style="color: var(--ss-muted); font-size: var(--ss-fs-help);">{{ t.credit_account_code or '(dynamic)' }}</td>
+          <td style="font-size: var(--ss-fs-help);">
+            {% set fields = t.required_fields | reject("equalto", "total_amount") | list %}
+            {% if fields %}
+              {% for f in fields %}<span class="ac-code">{{ f }}</span>{% if not loop.last %} {% endif %}{% endfor %}
+            {% else %}
+              <span style="color: var(--ss-muted);">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

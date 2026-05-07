@@ -1,0 +1,30 @@
+<style>
+  .q-number-wrap { display: flex; align-items: center; max-width: 240px; }
+  .q-number-prefix {
+    padding: 10px 14px;
+    background: var(--rs-surface-deep);
+    border: 1px solid var(--rs-border);
+    border-right: none;
+    border-radius: 12px 0 0 12px;
+    color: var(--rs-muted);
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .q-number-wrap input[type="number"] {
+    border-radius: 0 12px 12px 0;
+    width: auto;
+    min-width: 160px;
+  }
+</style>
+
+<div class="rs-field">
+  <div class="q-number-wrap">
+    <span class="q-number-prefix">$</span>
+    <input type="number" name="answer"
+           step="0.01" min="0"
+           value="{{ answers.get(step.maps_to, '') }}"
+           placeholder="0.00"
+           {% if not step.optional %}required{% endif %}
+           autofocus />
+  </div>
+</div>

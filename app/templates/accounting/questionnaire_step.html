@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<style>
+  .q-shell {
+    max-width: 640px;
+    margin: 0 auto;
+    padding-bottom: 48px;
+  }
+  .q-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .q-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--rs-text);
+  }
+  .q-progress-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--rs-muted);
+    margin-bottom: 8px;
+  }
+  .q-progress-track {
+    height: 6px;
+    background: var(--rs-surface-deep);
+    border-radius: 999px;
+    overflow: hidden;
+    margin-bottom: 24px;
+  }
+  .q-progress-fill {
+    height: 100%;
+    background: var(--rs-accent);
+    border-radius: 999px;
+    transition: width 0.3s ease;
+  }
+  .q-card {
+    padding: 28px 28px 24px;
+  }
+  .q-question {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--rs-text);
+    margin: 0 0 8px;
+  }
+  .q-help {
+    font-size: 0.92rem;
+    color: var(--rs-muted);
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+  .q-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 24px;
+    flex-wrap: wrap;
+  }
+  .q-error {
+    background: rgba(139, 63, 73, 0.06);
+    border: 1px solid rgba(139, 63, 73, 0.3);
+    border-radius: 12px;
+    padding: 12px 16px;
+    color: var(--rs-danger);
+    font-size: 0.92rem;
+    margin-bottom: 16px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="q-shell">
+
+  <div class="q-header">
+    <h1>New Entry</h1>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">Cancel</a>
+  </div>
+
+  <div class="q-progress-label">Step {{ done + 1 }} of ~{{ total }}</div>
+  <div class="q-progress-track">
+    <div class="q-progress-fill"
+         style="width: {{ ((done / total * 100) | int) if total else 0 }}%;"></div>
+  </div>
+
+  {% if error %}
+  <div class="q-error"><b>Error:</b> {{ error }}</div>
+  {% endif %}
+
+  <div class="rs-card q-card">
+    <div class="q-question">
+      {{ step.question }}
+      {% if step.optional %}<span style="font-size:0.85rem; font-weight:400; color:var(--rs-muted);"> (optional)</span>{% endif %}
+    </div>
+    {% if step.help_text %}
+    <p class="q-help">{{ step.help_text }}</p>
+    {% endif %}
+
+    <form id="q-answer" method="post" action="/accounting/entry/answer"
+          {% if step.input_type == "file_upload" %}enctype="multipart/form-data"{% endif %}>
+      <input type="hidden" name="session_id" value="{{ session_id }}" />
+      <input type="hidden" name="step_id" value="{{ step.id }}" />
+
+      {% if step.input_type == "multi_choice" %}
+        {% include "accounting/_step_multi_choice.html" %}
+      {% elif step.input_type == "number" %}
+        {% include "accounting/_step_number.html" %}
+      {% elif step.input_type == "date" %}
+        {% include "accounting/_step_date.html" %}
+      {% elif step.input_type == "text" %}
+        {% include "accounting/_step_text.html" %}
+      {% elif step.input_type == "account_picker" %}
+        {% include "accounting/_step_account_picker.html" %}
+      {% elif step.input_type == "inventory_picker" %}
+        {% include "accounting/_step_inventory_picker.html" %}
+      {% elif step.input_type == "file_upload" %}
+        {% include "accounting/_step_file_upload.html" %}
+      {% endif %}
+
+      <div class="q-actions">
+        {% if step.input_type != "multi_choice" %}
+        <button type="submit" class="rs-btn rs-btn-primary">
+          {% if step.optional %}Skip →{% else %}Next →{% endif %}
+        </button>
+        {% endif %}
+        {% if done > 0 %}
+        <button type="submit" form="q-back" class="rs-btn rs-btn-ghost">← Back</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+
+</div>
+
+{# Back form — separate element so it doesn't nest inside q-answer #}
+{% if done > 0 %}
+<form id="q-back" method="post" action="/accounting/entry/back" style="display:none;">
+  <input type="hidden" name="session_id" value="{{ session_id }}" />
+</form>
+{% endif %}
+
+{% endblock %}

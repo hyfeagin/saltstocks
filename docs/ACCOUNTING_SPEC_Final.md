@@ -1888,40 +1888,40 @@ Check items off as they are completed. Items are ordered so each one can be done
 **Database migrations**
 - [x] Add `accounts` table to `app/migrate.py` with all columns from §6.1; seed the full default chart of accounts on first run
 - [x] Add `journal_entries` table to `app/migrate.py`
-- [ ] Add `journal_lines` table to `app/migrate.py` with CHECK constraint (debit XOR credit)
-- [ ] Add `receipts` table to `app/migrate.py`
-- [ ] Add `sales_tax_rates` table to `app/migrate.py`; seed North Carolina rate
+- [x] Add `journal_lines` table to `app/migrate.py` with CHECK constraint (debit XOR credit)
+- [x] Add `receipts` table to `app/migrate.py`
+- [x] Add `sales_tax_rates` table to `app/migrate.py`; seed North Carolina rate
 
 **Posting engine**
-- [ ] Create `app/accounting/posting.py` — `post_entry(conn, answer_set)`: validates balance (Decimal, debits == credits), writes `journal_entries` + `journal_lines` atomically, raises on imbalance or zero
-- [ ] Add `void_entry(conn, entry_id, reason)` to `posting.py` — writes a reversing entry, marks both rows `is_void=True`
-- [ ] Add `allocate_freight_in(line_items, freight_amount)` utility to `posting.py` — dollar-weighted allocation, last item absorbs rounding remainder (see §8.5)
+- [x] Create `app/accounting/posting.py` — `post_entry(conn, answer_set)`: validates balance (Decimal, debits == credits), writes `journal_entries` + `journal_lines` atomically, raises on imbalance or zero
+- [x] Add `void_entry(conn, entry_id, reason)` to `posting.py` — writes a reversing entry, marks both rows `is_void=True`
+- [x] Add `allocate_freight_in(line_items, freight_amount)` utility to `posting.py` — dollar-weighted allocation, last item absorbs rounding remainder (see §8.5)
 
 **Template catalog**
-- [ ] Create `app/accounting/catalog.py` — define all ~24 templates from §3.4 as Python dicts/dataclasses: `id`, `name`, `debit_account_code`, `credit_account_code`, `required_fields`
+- [x] Create `app/accounting/catalog.py` — define all ~24 templates from §3.4 as Python dicts/dataclasses: `id`, `name`, `debit_account_code`, `credit_account_code`, `required_fields`
 
 **Router & nav**
-- [ ] Create `app/accounting/routes.py` — FastAPI `APIRouter`, register in `app/main.py` with prefix `/accounting`
-- [ ] Add "Accounting" link to `app/templates/base.html` nav
+- [x] Create `app/accounting/routes.py` — FastAPI `APIRouter`, register in `app/main.py` with prefix `/accounting`
+- [x] Add "Accounting" link to `app/templates/base.html` nav
 
 **Chart of accounts UI**
-- [ ] `GET /accounting/accounts` — list all accounts, grouped by type; HTML table
-- [ ] `POST /accounting/accounts` — add a custom account (name, type, subtype)
-- [ ] `POST /accounting/accounts/{id}` — rename or toggle `is_active`; block delete on `is_system_protected` accounts
+- [x] `GET /accounting/accounts` — list all accounts, grouped by type; HTML table
+- [x] `POST /accounting/accounts` — add a custom account (name, type, subtype)
+- [x] `POST /accounting/accounts/{id}` — rename or toggle `is_active`; block delete on `is_system_protected` accounts
 
 **Manual entry form (developer harness — replaced in Phase 2)**
-- [ ] `GET /accounting/entry/manual` — form: template dropdown, date, amount, vendor, memo, optional payment account
-- [ ] `POST /accounting/entry/manual` — validates, calls `post_entry()`, redirects to entry list
-- [ ] Create `app/templates/accounting/entry_manual.html`
+- [x] `GET /accounting/entry/manual` — form: template dropdown, date, amount, vendor, memo, optional payment account
+- [x] `POST /accounting/entry/manual` — validates, calls `post_entry()`, redirects to entry list
+- [x] Create `app/templates/accounting/entry_manual.html`
 
 **Entry list & detail**
-- [ ] `GET /accounting/entries` — table: date, template, vendor, amount, void status; filters: date range, template
-- [ ] `GET /accounting/entries/{id}` — detail: journal lines (account name, debit, credit), receipt thumbnails, void button
-- [ ] Create `app/templates/accounting/entry_list.html` and `entry_detail.html`
+- [x] `GET /accounting/entries` — table: date, template, vendor, amount, void status; filters: date range, template
+- [x] `GET /accounting/entries/{id}` — detail: journal lines (account name, debit, credit), receipt thumbnails, void button
+- [x] Create `app/templates/accounting/entry_list.html` and `entry_detail.html`
 
 **Receipt storage**
-- [ ] `POST /accounting/entries/{id}/receipts` — accept file upload, compute SHA-256, store under `data/receipts/YYYY/MM/{uuid}.ext`, insert `receipts` row
-- [ ] `GET /accounting/receipts/{id}/file` — stream file from disk
+- [x] `POST /accounting/entries/{id}/receipts` — accept file upload, compute SHA-256, store under `data/receipts/YYYY/MM/{uuid}.ext`, insert `receipts` row
+- [x] `GET /accounting/receipts/{id}/file` — stream file from disk
 
 **Exit criteria checkpoint:** can record any transaction manually, see it in the list with journal lines, and attach a receipt.
 
@@ -1930,37 +1930,37 @@ Check items off as they are completed. Items are ordered so each one can be done
 ### Phase 2 — Questionnaire (Core MVP)
 
 **Canonical schema**
-- [ ] Create `app/accounting/schemas.py` — `TransactionAnswerSet` Pydantic model (all fields from §5.1), `InventoryLink` model, `LineItem` model (for multi-SKU purchases)
+- [x] Create `app/accounting/schemas.py` — `TransactionAnswerSet` Pydantic model (all fields from §5.1), `InventoryLink` model, `LineItem` model (for multi-SKU purchases)
 
 **Questionnaire engine**
-- [ ] Create `app/accounting/questionnaire.py` — `Step` class (id, question, input_type, options, maps_to, shown_when, optional, default, help_text); `QuestionnaireSession` that holds partial answer-set and current step
-- [ ] Add session storage for in-progress questionnaires (SQLite `questionnaire_sessions` table OR server-side dict keyed by session token — SQLite preferred for persistence)
-- [ ] `GET /accounting/entry/start` — creates session, returns first step (transaction type picker)
-- [ ] `POST /accounting/entry/answer` — body: `{session_id, step_id, answer}`; advances session, returns next step or `{done: true, answer_set: ...}`
-- [ ] `POST /accounting/entry/preview` — body: completed answer-set; calls template engine to produce proposed `JournalEntry` with lines + plain-English summary string; does NOT write to DB
-- [ ] `POST /accounting/entry/confirm` — body: confirmed answer-set + receipt files; calls `post_entry()` atomically, stores receipts, redirects to entry detail
+- [x] Create `app/accounting/questionnaire.py` — `Step` class (id, question, input_type, options, maps_to, shown_when, optional, default, help_text); `QuestionnaireSession` that holds partial answer-set and current step
+- [x] Add session storage for in-progress questionnaires (SQLite `questionnaire_sessions` table OR server-side dict keyed by session token — SQLite preferred for persistence)
+- [x] `GET /accounting/entry/start` — creates session, returns first step (transaction type picker)
+- [x] `POST /accounting/entry/answer` — body: `{session_id, step_id, answer}`; advances session, returns next step or `{done: true, answer_set: ...}`
+- [x] `POST /accounting/entry/preview` — body: completed answer-set; calls template engine to produce proposed `JournalEntry` with lines + plain-English summary string; does NOT write to DB
+- [x] `POST /accounting/entry/confirm` — body: confirmed answer-set + receipt files; calls `post_entry()` atomically, stores receipts, redirects to entry detail
 
 **Questionnaire UI templates**
-- [ ] Create `app/templates/accounting/questionnaire_step.html` — shell with progress indicator ("Step N of ~M"), Back button, renders the current step partial
-- [ ] Create step partial: `_step_multi_choice.html` — big tappable buttons (see §14.6 for button styling)
-- [ ] Create step partial: `_step_number.html` — number input with optional help text
-- [ ] Create step partial: `_step_date.html` — date picker with Today / Yesterday quick buttons
-- [ ] Create step partial: `_step_text.html` — free-text input, optional flag
-- [ ] Create step partial: `_step_account_picker.html` — dropdown filtered by subtype
-- [ ] Create step partial: `_step_inventory_picker.html` — "create new" vs "link existing SKU" with search; "+ Add another item" button for multi-SKU purchases
-- [ ] Create step partial: `_step_file_upload.html` — drag/drop or skip
-- [ ] Create `app/templates/accounting/entry_confirm.html` — plain-English summary card (use canonical card recipe from §14.6), Edit / Record It buttons
+- [x] Create `app/templates/accounting/questionnaire_step.html` — shell with progress indicator ("Step N of ~M"), Back button, renders the current step partial
+- [x] Create step partial: `_step_multi_choice.html` — big tappable buttons (see §14.6 for button styling)
+- [x] Create step partial: `_step_number.html` — number input with optional help text
+- [x] Create step partial: `_step_date.html` — date picker with Today / Yesterday quick buttons
+- [x] Create step partial: `_step_text.html` — free-text input, optional flag
+- [x] Create step partial: `_step_account_picker.html` — dropdown filtered by subtype
+- [x] Create step partial: `_step_inventory_picker.html` — "create new" vs "link existing SKU" with search; "+ Add another item" button for multi-SKU purchases
+- [x] Create step partial: `_step_file_upload.html` — drag/drop or skip
+- [x] Create `app/templates/accounting/entry_confirm.html` — plain-English summary card (use canonical card recipe from §14.6), Edit / Record It buttons
 
 **Apply design system**
-- [ ] Import `colors_and_type.css` tokens into `app/static/css/` (or merge into existing `resale.css`)
-- [ ] Apply salt-marsh palette to all accounting templates — use `--ss-*` CSS variables throughout
-- [ ] Use canonical card recipe (§14.6) for all shells (search, tabs, panels, forms)
-- [ ] Use status pill pattern for any status display
-- [ ] Apply typography scale — H1s use Fraunces display font, body uses Inter
-- [ ] Ensure all buttons use pill radius (`--ss-r-pill`) and appropriate variants (primary/ghost/danger)
+- [x] Import `colors_and_type.css` tokens into `app/static/css/` (or merge into existing `resale.css`)
+- [x] Apply salt-marsh palette to all accounting templates — use `--ss-*` CSS variables throughout
+- [x] Use canonical card recipe (§14.6) for all shells (search, tabs, panels, forms)
+- [x] Use status pill pattern for any status display
+- [x] Apply typography scale — H1s use Fraunces display font, body uses Inter
+- [x] Ensure all buttons use pill radius (`--ss-r-pill`) and appropriate variants (primary/ghost/danger)
 
 **Wire templates to questionnaire flows**
-- [ ] Wire `BUY_INVENTORY` — business funds inventory purchase (questions: type → amount → date → vendor → payment account → inventory link → freight-in → receipt)
+- [x] Wire `BUY_INVENTORY` — business funds inventory purchase (questions: type → amount → date → vendor → payment account → inventory link → freight-in → receipt)
 - [ ] Wire `BUY_INVENTORY_PERSONAL` — personal funds inventory purchase (same flow, skips payment account, credit = Owner Contributions)
 - [ ] Wire `BUY_EXPENSE_PERSONAL` — personal funds business expense (questions: type → expense category → amount → date → vendor → receipt)
 - [ ] Wire `REIMBURSE_OWNER` — business pays owner back (questions: amount ≤ current balance → source bank account → date → memo)

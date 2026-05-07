@@ -1,22 +1,78 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>{{ title if title else "Salt Stocks" }}</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+
   <style>
-    body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Arial; margin: 24px; }
-    nav a { margin-right: 12px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 16px; margin: 12px 0; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid #eee; padding: 8px; text-align: left; vertical-align: top; }
-    input, select, textarea { padding: 8px; width: 100%; box-sizing: border-box; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .btn { padding: 8px 12px; border: 1px solid #333; border-radius: 8px; background: #fff; cursor: pointer; }
-    .btn-primary { background: #111; color: #fff; border-color: #111; }
-    .muted { color: #666; }
-    .pill { padding: 2px 8px; border: 1px solid #ccc; border-radius: 999px; font-size: 12px; display: inline-block; }
+    /* ── Page chrome ─────────────────────────────────────── */
+    body  { margin: 24px; }
+    nav   { margin-bottom: 12px; }
+    nav a { margin-right: 14px; color: var(--ss-accent-strong); text-decoration: none; font-weight: 500; }
+    nav a:hover { color: var(--ss-accent); }
+    hr    { border: none; border-top: 1px solid var(--ss-border); margin: 0 0 20px; }
+
+    /* ── Legacy utility classes (used by non-resale pages) ─ */
+    .card  { border: 1px solid var(--ss-border); border-radius: var(--ss-r-card);
+             box-shadow: var(--ss-shadow-card); padding: 16px; margin: 12px 0;
+             background: var(--ss-surface); }
+    .row   { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .muted { color: var(--ss-muted); }
+    .pill  { padding: 2px 8px; border: 1px solid var(--ss-border);
+             border-radius: var(--ss-r-pill); font-size: var(--ss-fs-pill);
+             display: inline-block; }
+    .pill-active   { border-color: var(--ss-accent);  color: var(--ss-accent-strong); background: var(--ss-accent-soft); }
+    .pill-inactive { border-color: var(--ss-border-strong); color: var(--ss-muted); }
+    .pill-warn     { border-color: var(--ss-warn);   color: var(--ss-warn);   background: var(--ss-warn-bg); }
+    .pill-error    { border-color: var(--ss-danger); color: var(--ss-danger); background: var(--ss-danger-bg); }
+    .btn   { padding: 8px 14px; border: 1px solid var(--ss-border-strong);
+             border-radius: var(--ss-r-pill); background: var(--ss-surface);
+             color: var(--ss-accent-strong); cursor: pointer; font-weight: 600;
+             font-size: var(--ss-fs-body); font-family: inherit; }
+    .btn-primary { background: var(--ss-accent); color: #f6fffb; border-color: var(--ss-accent); }
+    .btn-ghost   { background: var(--ss-surface-alt); }
+    .btn-danger  { border-color: var(--ss-danger); color: var(--ss-danger); background: var(--ss-danger-bg); }
+
+    /* ── Tables ──────────────────────────────────────────── */
+    table    { width: 100%; border-collapse: collapse; }
+    th, td   { border-bottom: 1px solid var(--ss-border); padding: 8px;
+               text-align: left; vertical-align: top; }
+
+    /* ── Forms ───────────────────────────────────────────── */
+    input, select, textarea {
+      padding: 8px 10px;
+      width: 100%;
+      box-sizing: border-box;
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-r-input);
+      background: var(--ss-surface-input);
+      color: var(--ss-text);
+      font-family: inherit;
+      font-size: var(--ss-fs-body);
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: 2px solid var(--ss-accent-glow);
+      border-color: var(--ss-accent);
+    }
+    label { font-size: var(--ss-fs-label); font-weight: 600; color: var(--ss-muted); }
+
+    /* ── Semantic banners ────────────────────────────────── */
+    .banner { border: 1px solid var(--ss-border); border-radius: var(--ss-r-card);
+              padding: 14px 18px; margin: 12px 0; font-size: var(--ss-fs-body);
+              background: var(--ss-surface); }
+    .banner-success { border-color: var(--ss-accent); background: var(--ss-accent-soft);
+                      color: var(--ss-accent-strong); }
+    .banner-warn    { border-color: var(--ss-warn);   background: var(--ss-warn-bg);
+                      color: var(--ss-warn); }
+    .banner-error   { border-color: var(--ss-danger); background: var(--ss-danger-bg);
+                      color: var(--ss-danger); }
   </style>
+
   {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -25,6 +81,7 @@
     <a href="/resale">Resale Inventory</a>
     <a href="/config">Configurator</a>
     <a href="/ebay/import">Import eBay Orders</a>
+    <a href="/accounting">Accounting</a>
   </nav>
   <hr />
   {% block content %}{% endblock %}

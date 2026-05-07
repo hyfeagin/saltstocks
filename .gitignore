@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 data/saltstocks.db
 data/backups/
+data/receipts/
 .DS_Store

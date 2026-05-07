@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<style>
+  .ec-shell {
+    max-width: 640px;
+    margin: 0 auto;
+    padding-bottom: 48px;
+  }
+  .ec-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .ec-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--rs-text);
+  }
+
+  /* Plain-English summary card */
+  .ec-summary-card {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-border);
+    border-left: 4px solid var(--rs-accent);
+    border-radius: 18px;
+    box-shadow: 0 12px 24px rgba(24, 50, 45, 0.08);
+    padding: 24px 24px 20px;
+    margin-bottom: 16px;
+  }
+  .ec-summary-eyebrow {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--rs-accent);
+    margin-bottom: 10px;
+  }
+  .ec-summary-text {
+    font-size: 1.1rem;
+    line-height: 1.55;
+    color: var(--rs-text);
+    margin: 0 0 18px;
+  }
+  .ec-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ec-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    background: var(--rs-surface-deep);
+    border-radius: 999px;
+    font-size: 0.82rem;
+    color: var(--rs-accent-strong);
+    font-weight: 500;
+  }
+  .ec-chip-label {
+    color: var(--rs-muted);
+    font-weight: 400;
+  }
+
+  /* Accounting details disclosure */
+  .ec-details-card {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-border);
+    border-radius: 18px;
+    box-shadow: 0 12px 24px rgba(24, 50, 45, 0.08);
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .ec-details-summary {
+    padding: 16px 20px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--rs-muted);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+  .ec-details-summary::-webkit-details-marker { display: none; }
+  .ec-details-summary::before {
+    content: "▸";
+    font-size: 0.75rem;
+    transition: transform 0.15s ease;
+  }
+  details[open] .ec-details-summary::before { transform: rotate(90deg); }
+  .ec-details-table {
+    padding: 0 20px 20px;
+    overflow-x: auto;
+  }
+  .ec-details-table table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  .ec-details-table th {
+    padding: 6px 10px;
+    text-align: left;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--rs-muted);
+    border-bottom: 1px solid var(--rs-border);
+  }
+  .ec-details-table td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--rs-surface-alt);
+    vertical-align: top;
+  }
+  .ec-details-table tfoot td {
+    border-top: 2px solid var(--rs-border);
+    border-bottom: none;
+    font-weight: 700;
+    padding-top: 10px;
+  }
+  .ec-code {
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+    background: var(--rs-surface-deep);
+    border-radius: 5px;
+    padding: 1px 6px;
+    color: var(--rs-accent-strong);
+  }
+  .ec-num { text-align: right; }
+  .ec-muted { color: var(--rs-muted); }
+
+  /* Receipt + action card */
+  .ec-action-card {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-border);
+    border-radius: 18px;
+    box-shadow: 0 12px 24px rgba(24, 50, 45, 0.08);
+    padding: 20px 24px;
+  }
+  .ec-receipt-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--rs-muted);
+    margin-bottom: 8px;
+  }
+  .ec-receipt-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .ec-receipt-row input[type="file"] {
+    flex: 1;
+    min-width: 180px;
+    width: auto;
+    border: 1px solid var(--rs-border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    background: #fcfffd;
+    font-size: 0.9rem;
+    color: var(--rs-text);
+  }
+  .ec-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .rs-btn-record {
+    background: var(--rs-accent);
+    border-color: var(--rs-accent);
+    color: #f6fffb;
+    font-size: 1rem;
+    padding: 0 24px;
+    min-height: 46px;
+  }
+  .rs-btn-record:hover { background: var(--rs-accent-strong); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ec-shell">
+
+  <div class="ec-header">
+    <h1>Review &amp; Confirm</h1>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">Cancel</a>
+  </div>
+
+  {# ── Plain-English summary card ── #}
+  <div class="ec-summary-card">
+    <div class="ec-summary-eyebrow">{{ template.name }}</div>
+    <p class="ec-summary-text">{{ summary_text }}</p>
+
+    <div class="ec-chips">
+      <span class="ec-chip">
+        <span class="ec-chip-label">Date</span>
+        {{ tas.entry_date }}
+      </span>
+      <span class="ec-chip">
+        <span class="ec-chip-label">Amount</span>
+        ${{ tas.total_amount }}
+      </span>
+      {% if tas.vendor %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Vendor</span>
+        {{ tas.vendor }}
+      </span>
+      {% endif %}
+      {% if inventory_item_name %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Item</span>
+        {{ inventory_item_name }}
+        {% if tas.inventory_link and tas.inventory_link.quantity > 1 %}
+          &times; {{ tas.inventory_link.quantity }}
+        {% endif %}
+      </span>
+      {% endif %}
+      {% if tas.freight_in_amount and tas.freight_in_amount > 0 %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Freight-in</span>
+        ${{ tas.freight_in_amount }}
+      </span>
+      {% endif %}
+      {% if tas.sales_tax_amount and tas.sales_tax_amount > 0 %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Sales tax</span>
+        ${{ tas.sales_tax_amount }}
+      </span>
+      {% endif %}
+      {% if payment_account_name %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Account</span>
+        {{ payment_account_name }}
+      </span>
+      {% endif %}
+      {% if expense_account_name %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Category</span>
+        {{ expense_account_name }}
+      </span>
+      {% endif %}
+      {% if tas.memo %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Note</span>
+        {{ tas.memo }}
+      </span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ── Accounting details (collapsed by default) ── #}
+  <details class="ec-details-card">
+    <summary class="ec-details-summary">Accounting details</summary>
+    <div class="ec-details-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Name</th>
+            <th class="ec-num">Debit</th>
+            <th class="ec-num">Credit</th>
+            <th>Memo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for ln in lines %}
+          <tr>
+            <td><span class="ec-code">{{ ln['account_code'] }}</span></td>
+            <td>{{ ln['account_name'] }}</td>
+            <td class="ec-num">
+              {% if ln['debit'] not in ('0', '0.00') %}
+                <b>${{ ln['debit'] }}</b>
+              {% else %}
+                <span class="ec-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="ec-num">
+              {% if ln['credit'] not in ('0', '0.00') %}
+                <b>${{ ln['credit'] }}</b>
+              {% else %}
+                <span class="ec-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="ec-muted">{{ ln['memo'] or '' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2" style="text-align:right; color:var(--rs-muted); font-size:0.82rem;">Totals</td>
+            <td class="ec-num">${{ lines | sum(attribute='debit') | float | round(2) }}</td>
+            <td class="ec-num">${{ lines | sum(attribute='credit') | float | round(2) }}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </details>
+
+  {# ── Receipt + action card ── #}
+  <div class="ec-action-card">
+    <form method="post" action="/accounting/entry/confirm"
+          enctype="multipart/form-data">
+      <input type="hidden" name="session_id" value="{{ session_id }}" />
+
+      <div class="ec-receipt-label">
+        Attach receipt
+        <span style="font-weight:400;"> — optional, can be added later</span>
+      </div>
+      <div class="ec-receipt-row">
+        <input type="file" name="receipt" accept="image/*,application/pdf" />
+      </div>
+
+      <div class="ec-actions">
+        <button type="submit" class="rs-btn rs-btn-record">
+          ✓ Looks right — record it
+        </button>
+        <button type="submit"
+                formaction="/accounting/entry/back-to-edit"
+                formenctype="application/x-www-form-urlencoded"
+                class="rs-btn rs-btn-ghost">
+          ← Edit answers
+        </button>
+      </div>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

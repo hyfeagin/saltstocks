@@ -1,0 +1,162 @@
+<style>
+  .q-inv-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+  .q-inv-tab {
+    padding: 8px 18px;
+    border-radius: 999px;
+    border: 1px solid var(--rs-border);
+    background: var(--rs-surface);
+    color: var(--rs-muted);
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .q-inv-tab.active {
+    background: rgba(47, 143, 115, 0.12);
+    border-color: var(--rs-accent);
+    color: var(--rs-accent-strong);
+  }
+  .q-inv-panel { display: none; }
+  .q-inv-panel.visible { display: block; }
+  .q-inv-search {
+    margin-bottom: 10px;
+  }
+  .q-inv-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .q-inv-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--rs-border);
+    border-radius: 10px;
+    background: var(--rs-surface);
+    cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .q-inv-item:hover, .q-inv-item.selected {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt);
+  }
+  .q-inv-item input[type="radio"] {
+    width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--rs-accent);
+  }
+  .q-inv-sku {
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    font-size: 0.78rem;
+    background: var(--rs-surface-deep);
+    border-radius: 5px;
+    padding: 1px 6px;
+    color: var(--rs-accent-strong);
+    white-space: nowrap;
+  }
+  .q-inv-name { font-size: 0.93rem; }
+  .q-inv-qty { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+  .q-inv-qty label { font-size: 0.82rem; font-weight: 600; color: var(--rs-muted); white-space: nowrap; }
+  .q-inv-qty input { width: 80px; }
+</style>
+
+<input type="hidden" name="answer" id="q-inv-answer" value="" />
+
+<div class="q-inv-tabs">
+  <button type="button" class="q-inv-tab active" id="q-tab-link" onclick="switchTab('link')">Link existing</button>
+  <button type="button" class="q-inv-tab" id="q-tab-new" onclick="switchTab('new')">Create new item</button>
+</div>
+
+{# ── Link existing panel ── #}
+<div class="q-inv-panel visible" id="q-panel-link">
+  {% if inventory_items %}
+  <div class="rs-field q-inv-search">
+    <input type="text" id="q-inv-search" placeholder="Search by name or SKU…" oninput="filterItems()" />
+  </div>
+  <div class="q-inv-list" id="q-inv-list">
+    {% for item in inventory_items %}
+    <label class="q-inv-item" data-name="{{ item['name'] | lower }}" data-sku="{{ (item['sku'] or '') | lower }}">
+      <input type="radio" name="_item_radio" value="{{ item['id'] }}" onchange="selectItem({{ item['id'] }})" />
+      {% if item['sku'] %}<span class="q-inv-sku">{{ item['sku'] }}</span>{% endif %}
+      <span class="q-inv-name">{{ item['name'] }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="q-help" style="margin:0;">No inventory items yet — use "Create new item" to add one.</p>
+  {% endif %}
+</div>
+
+{# ── Create new panel ── #}
+<div class="q-inv-panel" id="q-panel-new">
+  <div class="rs-field" style="margin-bottom: 10px;">
+    <label style="font-size:0.82rem; font-weight:600; color:var(--rs-muted);">Item name</label>
+    <input type="text" id="q-new-name" placeholder="e.g. Funko Pop — Batman #234" />
+  </div>
+</div>
+
+<div class="q-inv-qty">
+  <label for="q-inv-qty-input">Quantity</label>
+  <input type="number" id="q-inv-qty-input" min="1" value="1" style="width:80px;" />
+</div>
+
+<script>
+(function() {
+  var mode = "link";
+
+  window.switchTab = function(tab) {
+    mode = tab;
+    document.getElementById("q-panel-link").className = "q-inv-panel" + (tab === "link" ? " visible" : "");
+    document.getElementById("q-panel-new").className  = "q-inv-panel" + (tab === "new"  ? " visible" : "");
+    document.getElementById("q-tab-link").className = "q-inv-tab" + (tab === "link" ? " active" : "");
+    document.getElementById("q-tab-new").className  = "q-inv-tab" + (tab === "new"  ? " active" : "");
+    document.getElementById("q-inv-answer").value = "";
+  };
+
+  window.selectItem = function(itemId) {
+    var qty = parseInt(document.getElementById("q-inv-qty-input").value) || 1;
+    document.getElementById("q-inv-answer").value = JSON.stringify({
+      mode: "link_existing", item_id: itemId, quantity: qty
+    });
+    // highlight selected row
+    var items = document.querySelectorAll(".q-inv-item");
+    items.forEach(function(el) { el.classList.remove("selected"); });
+    var radio = document.querySelector("[name='_item_radio']:checked");
+    if (radio) radio.closest(".q-inv-item").classList.add("selected");
+  };
+
+  window.filterItems = function() {
+    var q = document.getElementById("q-inv-search").value.toLowerCase();
+    document.querySelectorAll(".q-inv-item").forEach(function(el) {
+      var match = (el.dataset.name + " " + el.dataset.sku).includes(q);
+      el.style.display = match ? "" : "none";
+    });
+  };
+
+  // Rebuild answer before form submit
+  document.getElementById("q-answer").addEventListener("submit", function(e) {
+    var qty = parseInt(document.getElementById("q-inv-qty-input").value) || 1;
+    if (mode === "link") {
+      var radio = document.querySelector("[name='_item_radio']:checked");
+      if (!radio) {
+        e.preventDefault();
+        alert("Please select an inventory item or switch to "Create new item".");
+        return;
+      }
+      document.getElementById("q-inv-answer").value = JSON.stringify({
+        mode: "link_existing", item_id: parseInt(radio.value), quantity: qty
+      });
+    } else {
+      var name = document.getElementById("q-new-name").value.trim();
+      if (!name) {
+        e.preventDefault();
+        alert("Please enter a name for the new item.");
+        return;
+      }
+      document.getElementById("q-inv-answer").value = JSON.stringify({
+        mode: "create_new", name: name, quantity: qty
+      });
+    }
+  });
+})();
+</script>
