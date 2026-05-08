@@ -213,6 +213,7 @@
       </span>
       {% endif %}
       {% if inventory_item_name %}
+      {# Sale context: single item #}
       <span class="ec-chip">
         <span class="ec-chip-label">Item</span>
         {{ inventory_item_name }}
@@ -221,16 +222,26 @@
         {% endif %}
       </span>
       {% endif %}
+      {% if purchase_items %}
+      {# Purchase context: one chip per SKU #}
+      {% for pi in purchase_items %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Item {{ loop.index }}</span>
+        {{ pi.item_name }} &times; {{ pi.quantity }}
+        @ ${{ "%.4f"|format(pi.allocated_unit_cost) }}
+      </span>
+      {% endfor %}
+      {% endif %}
       {% if tas.freight_in_amount and tas.freight_in_amount > 0 %}
       <span class="ec-chip">
         <span class="ec-chip-label">Freight-in</span>
         ${{ tas.freight_in_amount }}
       </span>
       {% endif %}
-      {% if inventory_unit_cost is not none and tas.freight_in_amount and tas.freight_in_amount > 0 %}
+      {% if tas.purchase_tax_amount and tas.purchase_tax_amount > 0 %}
       <span class="ec-chip">
-        <span class="ec-chip-label">Unit cost</span>
-        ${{ inventory_unit_cost }} each
+        <span class="ec-chip-label">Purchase tax</span>
+        ${{ tas.purchase_tax_amount }}
       </span>
       {% endif %}
       {% if tas.sales_tax_amount and tas.sales_tax_amount > 0 %}
@@ -300,8 +311,8 @@
         <tfoot>
           <tr>
             <td colspan="2" style="text-align:right; color:var(--rs-muted); font-size:0.82rem;">Totals</td>
-            <td class="ec-num">${{ lines | sum(attribute='debit') | float | round(2) }}</td>
-            <td class="ec-num">${{ lines | sum(attribute='credit') | float | round(2) }}</td>
+            <td class="ec-num">${{ "%.2f"|format(debit_total) }}</td>
+            <td class="ec-num">${{ "%.2f"|format(credit_total) }}</td>
             <td></td>
           </tr>
         </tfoot>
@@ -315,6 +326,17 @@
           enctype="multipart/form-data">
       <input type="hidden" name="session_id" value="{{ session_id }}" />
 
+      {% if session_receipt_files %}
+      <div class="ec-receipt-label">Receipt attached</div>
+      <div class="ec-receipt-row">
+        {% for f in session_receipt_files %}
+        <span class="ec-chip">
+          <span class="ec-chip-label">File</span>
+          {{ f.original_filename }}
+        </span>
+        {% endfor %}
+      </div>
+      {% else %}
       <div class="ec-receipt-label">
         Attach receipt
         <span style="font-weight:400;"> — optional, can be added later</span>
@@ -322,6 +344,7 @@
       <div class="ec-receipt-row">
         <input type="file" name="receipt" accept="image/*,application/pdf" />
       </div>
+      {% endif %}
 
       <div class="ec-actions">
         <button type="submit" class="rs-btn rs-btn-record">

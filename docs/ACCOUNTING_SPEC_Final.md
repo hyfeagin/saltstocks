@@ -2016,7 +2016,7 @@ Check items off as they are completed. Items are ordered so each one can be done
 - [x] `GET /accounting/owner-balance` — detail page: two columns (contributions list, draws list), running totals, "Reimburse myself" button that pre-fills `REIMBURSE_OWNER` questionnaire with full balance
 
 **Backup extension**
-- [ ] Extend `app/routers/dashboard.py` `backup_now()` — after copying the SQLite file, also `shutil.copytree` `data/receipts/` into the backup archive
+- [x] Extend `app/routers/dashboard.py` `backup_now()` — after copying the SQLite file, also `shutil.copytree` `data/receipts/` into the backup archive
 
 **Exit criteria checkpoint: Wave can be turned off.** Full accounting system operational without AI.
 
@@ -2024,8 +2024,8 @@ Check items off as they are completed. Items are ordered so each one can be done
 
 ### Phase 5 — AI Enhancement (Optional, Post-MVP)
 
-- [ ] Create `app/accounting/nlp.py` — Anthropic API call: sends user text + template catalog + account list, receives partial `TransactionAnswerSet` JSON with per-field confidence scores
-- [ ] Add "Talk to AI" option on entry chooser screen (`GET /accounting/entry/start`) — shown only when AI mode is enabled in settings
+- [x] Create `app/accounting/nlp.py` — Anthropic API call: sends user text + template catalog + account list, receives partial `TransactionAnswerSet` JSON with per-field confidence scores
+- [x] Add "Talk to AI" option on entry chooser screen (`GET /accounting/entry/start`) — shown only when AI mode is enabled in settings
 - [ ] `POST /accounting/entry/parse` — body: `{description}`; calls `nlp.py`, validates output, returns partial answer-set + list of remaining low-confidence questionnaire steps
 - [ ] Hand-off: any field with confidence < 0.7 or missing → injects corresponding questionnaire step before Confirm screen
 - [ ] Add AI mode enable/disable setting to accounting settings page

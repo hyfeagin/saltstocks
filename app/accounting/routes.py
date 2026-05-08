@@ -15,8 +15,8 @@ from urllib.parse import quote
 import csv
 import zipfile
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.deps import BASE_DIR, get_db, render
 from app.db import DB_PATH
@@ -32,6 +32,7 @@ from app.accounting.posting import (
     void_entry,
 )
 from app.accounting.questionnaire import (
+    GLOBAL_FLOW,
     QuestionnaireSession,
     build_answer_set,
     go_back,
@@ -48,10 +49,31 @@ from app.accounting.reports import (
     receipt_index,
     sales_tax_summary,
 )
+from app.accounting.nlp import CONFIDENCE_THRESHOLD, NLPResult, parse_transaction
+from app.accounting.questionnaire import _QUESTIONNAIRE_TEMPLATES
 from app.accounting.schemas import TransactionAnswerSet
 from app.utils import get_next_sku
 
 router = APIRouter()
+
+
+# ── App settings helpers ───────────────────────────────────────────────────────
+
+def _get_setting(conn: sqlite3.Connection, key: str, default: str = "") -> str:
+    row = conn.execute("SELECT value FROM app_settings WHERE key=?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def _set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')
+            """,
+            (key, value),
+        )
 
 _ACCOUNT_TYPES = ("asset", "liability", "equity", "income", "expense")
 _TYPE_LABELS = {
@@ -590,87 +612,84 @@ def _resolve_sale_inventory_context(
 def _resolve_inventory_purchase_context(
     conn: sqlite3.Connection,
     tas: TransactionAnswerSet,
-) -> dict:
-    """Return freight-allocated purchase cost context for inventory entries."""
-    if tas.inventory_link is None:
-        raise ValueError("Inventory purchases must link to an inventory item.")
+) -> list[dict]:
+    """Return freight-allocated purchase cost context for each line item.
 
-    link = tas.inventory_link
-    quantity = Decimal(link.quantity)
-    if quantity <= Decimal("0"):
-        raise ValueError("Purchased quantity must be greater than 0.")
+    Always returns a list (one dict per SKU). Raises ValueError on any problem.
+    """
+    if not tas.line_items:
+        raise ValueError("Inventory purchases must include at least one item.")
 
     freight = (tas.freight_in_amount or Decimal("0")).quantize(Decimal("0.01"))
-    total_amount = tas.total_amount.quantize(Decimal("0.01"))
-    if freight < Decimal("0"):
-        raise ValueError("Freight-in amount cannot be negative.")
-    if freight > total_amount:
-        raise ValueError("Freight-in amount cannot exceed the purchase total.")
+    ptax = (tas.purchase_tax_amount or Decimal("0")).quantize(Decimal("0.01"))
+    overhead = (freight + ptax).quantize(Decimal("0.01"))
+    if overhead < Decimal("0"):
+        raise ValueError("Freight and purchase tax cannot be negative.")
 
-    subtotal_cost = (total_amount - freight).quantize(Decimal("0.01"))
-    allocated_line = allocate_freight_in(
-        [
-            InventoryCostLineItem(
-                subtotal_cost=subtotal_cost,
-                quantity=link.quantity,
-            )
-        ],
-        freight,
-    )[0]
-    allocated_total_cost = allocated_line.total_cost.quantize(Decimal("0.01"))
-    allocated_unit_cost = (allocated_total_cost / quantity).quantize(Decimal("0.01"))
+    # Allocate freight + purchase tax together across items by subtotal
+    cost_inputs = [
+        InventoryCostLineItem(
+            subtotal_cost=li.subtotal_cost,
+            quantity=li.quantity,
+        )
+        for li in tas.line_items
+    ]
+    allocated = allocate_freight_in(cost_inputs, overhead)
 
-    if link.mode == "create_new":
-        return {
-            "mode": "create_new",
-            "item_id": None,
-            "item_name": link.name,
-            "quantity": link.quantity,
-            "allocated_total_cost": allocated_total_cost,
-            "allocated_unit_cost": allocated_unit_cost,
-        }
+    contexts: list[dict] = []
+    for li, alloc in zip(tas.line_items, allocated):
+        quantity = Decimal(str(li.quantity))
+        allocated_total = alloc.total_cost.quantize(Decimal("0.01"))
+        allocated_unit = (allocated_total / quantity).quantize(Decimal("0.0001"))
+        inv = li.inventory_link
 
-    item_id = link.item_id
-    if item_id is None and link.sku:
+        if inv.mode == "create_new":
+            contexts.append({
+                "mode": "create_new",
+                "item_id": None,
+                "item_name": inv.name,
+                "quantity": li.quantity,
+                "allocated_total_cost": allocated_total,
+                "allocated_unit_cost": allocated_unit,
+            })
+            continue
+
+        # link_existing
+        item_id = inv.item_id
+        if item_id is None and inv.sku:
+            row = conn.execute("SELECT id FROM items WHERE sku=?", (inv.sku,)).fetchone()
+            item_id = row["id"] if row else None
+        if item_id is None:
+            raise ValueError("Could not find an inventory item for this purchase line.")
+
         row = conn.execute(
-            "SELECT id FROM items WHERE sku=?", (link.sku,)
+            "SELECT id, name, item_type, qty_on_hand, unit_cost FROM items WHERE id=?",
+            (item_id,),
         ).fetchone()
-        item_id = row["id"] if row else None
-    if item_id is None:
-        raise ValueError("Could not find the inventory item selected for this purchase.")
+        if row is None:
+            raise ValueError(f"Inventory item {item_id} not found.")
+        if row["item_type"] != "resale":
+            raise ValueError("Inventory purchases can only be recorded against resale items.")
 
-    row = conn.execute(
-        """
-        SELECT id, name, item_type, qty_on_hand, unit_cost
-        FROM items
-        WHERE id=?
-        """,
-        (item_id,),
-    ).fetchone()
-    if row is None:
-        raise ValueError("Could not find the inventory item selected for this purchase.")
-    if row["item_type"] != "resale":
-        raise ValueError("Inventory purchases can only be recorded against resale inventory items.")
+        current_qty = Decimal(str(row["qty_on_hand"] or 0)).quantize(Decimal("0.0001"))
+        current_cost = Decimal(str(row["unit_cost"] or 0)).quantize(Decimal("0.0001"))
+        new_qty = current_qty + quantity
+        weighted_total = current_qty * current_cost + allocated_total
+        weighted_unit = (weighted_total / new_qty).quantize(Decimal("0.0001")) if new_qty > 0 else allocated_unit
 
-    current_qty = Decimal(str(row["qty_on_hand"] or 0)).quantize(Decimal("0.01"))
-    current_unit_cost = Decimal(str(row["unit_cost"] or 0)).quantize(Decimal("0.01"))
-    new_qty = current_qty + quantity
-    if new_qty <= Decimal("0"):
-        raise ValueError("Inventory quantity after purchase must be positive.")
-    weighted_total_cost = (current_qty * current_unit_cost) + allocated_total_cost
-    weighted_unit_cost = (weighted_total_cost / new_qty).quantize(Decimal("0.01"))
+        contexts.append({
+            "mode": "link_existing",
+            "item_id": item_id,
+            "item_name": row["name"],
+            "quantity": li.quantity,
+            "allocated_total_cost": allocated_total,
+            "allocated_unit_cost": allocated_unit,
+            "current_qty": current_qty,
+            "new_qty": new_qty,
+            "weighted_unit_cost": weighted_unit,
+        })
 
-    return {
-        "mode": "link_existing",
-        "item_id": item_id,
-        "item_name": row["name"],
-        "quantity": link.quantity,
-        "allocated_total_cost": allocated_total_cost,
-        "allocated_unit_cost": allocated_unit_cost,
-        "current_qty": current_qty,
-        "new_qty": new_qty,
-        "weighted_unit_cost": weighted_unit_cost,
-    }
+    return contexts
 
 
 @router.get("/", include_in_schema=False)
@@ -872,6 +891,33 @@ def sales_tax_settings_submit(
             )
 
     return RedirectResponse(url="/accounting/settings/sales-tax?saved=1", status_code=303)
+
+
+@router.get("/settings/ai", response_class=HTMLResponse)
+def ai_settings_page(
+    request: Request,
+    saved: int = 0,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    return render(
+        "accounting/settings_ai.html",
+        request,
+        saved=saved == 1,
+        ai_enabled=_get_setting(conn, "ai_enabled") == "1",
+        has_api_key=bool(_get_setting(conn, "anthropic_api_key")),
+    )
+
+
+@router.post("/settings/ai")
+def ai_settings_save(
+    ai_enabled: str = Form(""),
+    anthropic_api_key: str = Form(""),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    _set_setting(conn, "ai_enabled", "1" if ai_enabled == "1" else "0")
+    if anthropic_api_key.strip():
+        _set_setting(conn, "anthropic_api_key", anthropic_api_key.strip())
+    return RedirectResponse(url="/accounting/settings/ai?saved=1", status_code=303)
 
 
 # ── Manual Entry Form (developer harness) ─────────────────────────────────────
@@ -1314,6 +1360,9 @@ def entry_detail(
         (entry_id,),
     ).fetchall()
 
+    debit_total = sum(Decimal(str(ln["debit"])) for ln in lines)
+    credit_total = sum(Decimal(str(ln["credit"])) for ln in lines)
+
     return render(
         "accounting/entry_detail.html", request,
         entry=entry,
@@ -1322,6 +1371,8 @@ def entry_detail(
         voided=voided == 1,
         error=error,
         warn=warn,
+        debit_total=debit_total,
+        credit_total=credit_total,
     )
 
 
@@ -1494,30 +1545,222 @@ def _delete_session(conn: sqlite3.Connection, session_id: str) -> None:
         )
 
 
+# ── NLP prefill helper ────────────────────────────────────────────────────────
+
+def _prefill_session_from_nlp(session: QuestionnaireSession, result: NLPResult) -> None:
+    """Write NLP-extracted fields into a fresh session, skipping low-confidence ones."""
+    conf = result.confidence
+    template_id = result.template_id
+
+    if template_id and conf.get("template_id", 0) >= CONFIDENCE_THRESHOLD:
+        if template_id in CATALOG:
+            session.answers["template_id"] = template_id
+            session.history.append("template_id")
+        else:
+            template_id = None
+
+    if result.total_amount and conf.get("total_amount", 0) >= CONFIDENCE_THRESHOLD:
+        try:
+            session.answers["total_amount"] = Decimal(result.total_amount).quantize(Decimal("0.01"))
+            step_id = "total_amount_reimburse_owner" if template_id == "REIMBURSE_OWNER" else "total_amount"
+            session.history.append(step_id)
+        except Exception:
+            pass
+
+    if result.entry_date and conf.get("entry_date", 0) >= CONFIDENCE_THRESHOLD:
+        session.answers["entry_date"] = result.entry_date
+        session.history.append("entry_date")
+
+    if result.vendor and conf.get("vendor", 0) >= CONFIDENCE_THRESHOLD:
+        session.answers["vendor"] = result.vendor
+        session.history.append("vendor")
+
+    if result.payment_account_id and conf.get("payment_account_id", 0) >= CONFIDENCE_THRESHOLD:
+        session.answers["payment_account_id"] = result.payment_account_id
+        step_id = (
+            "payment_account_id_reimburse_owner"
+            if template_id == "REIMBURSE_OWNER"
+            else "payment_account_id"
+        )
+        session.history.append(step_id)
+
+    if result.memo and conf.get("memo", 0) >= CONFIDENCE_THRESHOLD:
+        session.answers["memo"] = result.memo
+        session.history.append("memo")
+
+
+def _compute_remaining_steps(session: QuestionnaireSession) -> list[dict]:
+    """Non-optional visible steps not yet answered — what the user still needs to fill in."""
+    answered = set(session.history)
+    return [
+        {"step_id": s.id, "question": s.question, "input_type": s.input_type}
+        for s in GLOBAL_FLOW
+        if s.id not in answered
+        and not s.optional
+        and (s.shown_when is None or s.shown_when(session.answers))
+    ]
+
+
 # ── Questionnaire routes ──────────────────────────────────────────────────────
 
-@router.get("/entry/start")
+@router.get("/entry/start", response_class=HTMLResponse)
 def entry_start(
+    request: Request,
     template_id: str = "",
     prefill_owner_balance: int = 0,
+    expense_account_code: str = "",
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Create a fresh session and redirect to the first step."""
+    """Show the entry chooser (no template_id) or start a questionnaire session."""
+    if not template_id:
+        ai_enabled = _get_setting(conn, "ai_enabled") == "1"
+        return render(
+            "accounting/entry_chooser.html",
+            request,
+            ai_enabled=ai_enabled,
+            error="",
+        )
+
     session = QuestionnaireSession()
-    if template_id:
-        session.answers["template_id"] = template_id
-        session.history.append("template_id")
+    session.answers["template_id"] = template_id
+    session.history.append("template_id")
+
     if template_id == "REIMBURSE_OWNER" and prefill_owner_balance == 1:
         balance = _owner_reimbursement_balance(conn)
         if balance > Decimal("0.00"):
             session.answers["total_amount"] = balance
             if "total_amount_reimburse_owner" not in session.history:
                 session.history.append("total_amount_reimburse_owner")
+
+    # Prefill expense category when launched from the chooser card
+    if expense_account_code and template_id == "BUY_EXPENSE_PERSONAL":
+        row = conn.execute(
+            "SELECT id FROM accounts WHERE code=? AND is_active=1",
+            (expense_account_code,),
+        ).fetchone()
+        if row:
+            session.answers["expense_category_account_id"] = row["id"]
+            session.history.append("expense_category_account_id_personal")
+
     _save_session(conn, session)
     return RedirectResponse(
         url=f"/accounting/entry/step/{session.session_id}",
         status_code=303,
     )
+
+
+@router.post("/entry/ai-start", response_class=HTMLResponse)
+def entry_ai_start(
+    request: Request,
+    user_text: str = Form(...),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Parse natural language, prefill a session, redirect to first unanswered step."""
+    ai_enabled = _get_setting(conn, "ai_enabled") == "1"
+    api_key = _get_setting(conn, "anthropic_api_key")
+
+    def _chooser_error(msg: str):
+        return render(
+            "accounting/entry_chooser.html",
+            request,
+            ai_enabled=ai_enabled,
+            error=msg,
+        )
+
+    if not ai_enabled:
+        return _chooser_error("AI mode is not enabled. Enable it in AI Settings.")
+    if not api_key:
+        return _chooser_error("No API key configured. Add one in AI Settings.")
+    if not user_text.strip():
+        return _chooser_error("Please describe the transaction before submitting.")
+
+    acct_rows = conn.execute(
+        "SELECT id, code, name, subtype FROM accounts ORDER BY code"
+    ).fetchall()
+    accounts = [
+        {"id": r["id"], "code": r["code"], "name": r["name"], "subtype": r["subtype"] or ""}
+        for r in acct_rows
+    ]
+
+    from datetime import date as date_cls
+    result = parse_transaction(user_text, accounts, date_cls.today(), api_key)
+
+    if result.error:
+        return _chooser_error(
+            f"AI couldn't reach the server — pick a template below to continue manually."
+        )
+
+    session = QuestionnaireSession()
+    _prefill_session_from_nlp(session, result)
+    _save_session(conn, session)
+    return RedirectResponse(
+        url=f"/accounting/entry/step/{session.session_id}",
+        status_code=303,
+    )
+
+
+@router.post("/entry/parse")
+def entry_parse(
+    description: str = Body(..., embed=True),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """JSON API: parse natural language → partial answer-set + remaining steps.
+
+    Request body (JSON): {"description": "..."}
+    Success: 200 with session_id, prefilled, confidence, remaining_steps, redirect_url
+    Failure: 4xx/502 with error + fallback: true
+    """
+    ai_enabled = _get_setting(conn, "ai_enabled") == "1"
+    api_key = _get_setting(conn, "anthropic_api_key")
+
+    if not ai_enabled:
+        return JSONResponse(
+            {"error": "AI mode is not enabled.", "fallback": True},
+            status_code=400,
+        )
+    if not api_key:
+        return JSONResponse(
+            {"error": "No Anthropic API key configured.", "fallback": True},
+            status_code=400,
+        )
+    if not description or not description.strip():
+        return JSONResponse({"error": "Description is required."}, status_code=400)
+
+    acct_rows = conn.execute(
+        "SELECT id, code, name, subtype FROM accounts ORDER BY code"
+    ).fetchall()
+    accounts = [
+        {"id": r["id"], "code": r["code"], "name": r["name"], "subtype": r["subtype"] or ""}
+        for r in acct_rows
+    ]
+
+    result = parse_transaction(description.strip(), accounts, date_type.today(), api_key)
+
+    if result.error:
+        import logging
+        logging.getLogger(__name__).error("NLP parse failed: %s", result.error)
+        return JSONResponse(
+            {"error": result.error, "fallback": True},
+            status_code=502,
+        )
+
+    session = QuestionnaireSession()
+    _prefill_session_from_nlp(session, result)
+    _save_session(conn, session)
+
+    prefilled = {
+        k: str(v) for k, v in session.answers.items()
+        if v is not None and k != "receipt_files"
+    }
+
+    return JSONResponse({
+        "session_id": session.session_id,
+        "prefilled": prefilled,
+        "confidence": result.confidence,
+        "payment_account_hint": result.payment_account_hint,
+        "remaining_steps": _compute_remaining_steps(session),
+        "redirect_url": f"/accounting/entry/step/{session.session_id}",
+    })
 
 
 @router.get("/entry/step/{session_id}", response_class=HTMLResponse)
@@ -1621,6 +1864,7 @@ def entry_answer(
     session_id: str = Form(...),
     step_id: str = Form(...),
     answer: str = Form(""),
+    receipt_preview_file: Optional[UploadFile] = File(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     session = _load_session(conn, session_id)
@@ -1662,6 +1906,30 @@ def entry_answer(
             status_code=303,
         )
 
+    if step.input_type == "file_upload" and receipt_preview_file and receipt_preview_file.filename:
+        content = receipt_preview_file.file.read()
+        if content:
+            sha256 = hashlib.sha256(content).hexdigest()
+            ext = Path(receipt_preview_file.filename).suffix.lower()
+            file_uuid = uuid.uuid4().hex
+            now = datetime.utcnow()
+            rel_path = (
+                Path("data") / "receipts" / "pending"
+                / str(now.year)
+                / f"{now.month:02d}"
+                / f"{file_uuid}{ext}"
+            )
+            abs_path = BASE_DIR / rel_path
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+            abs_path.write_bytes(content)
+            session.answers["receipt_files"] = [{
+                "original_filename": receipt_preview_file.filename,
+                "stored_path": str(rel_path),
+                "mime_type": receipt_preview_file.content_type or "application/octet-stream",
+                "file_size_bytes": len(content),
+                "sha256": sha256,
+            }]
+
     if session.answers.get("template_id") == "SELL_INVENTORY_CASH":
         if step_id == "sales_tax_applies" and session.answers.get("sales_tax_applies") != "yes":
             session.answers.pop("sales_tax_mode", None)
@@ -1698,56 +1966,42 @@ def _build_summary_text(
     payment_account_name: Optional[str],
     expense_account_name: Optional[str],
     inventory_item_name: Optional[str],
-    inventory_purchase_ctx: Optional[dict] = None,
+    purchase_items: Optional[list[dict]] = None,
 ) -> str:
     """Return a plain-English sentence describing the transaction."""
     amt = f"${tas.total_amount:.2f}"
     tid = tas.template_id
-
-    # Inventory item description ("3 Funko Pops" or just "items")
-    item_desc: Optional[str] = None
-    if tas.inventory_link:
-        qty = tas.inventory_link.quantity or 1
-        name = inventory_item_name or tas.inventory_link.name or "items"
-        item_desc = f'{qty} “{name}”' if qty > 1 else f'“{name}”'
-
     vendor_part = f" from {tas.vendor}" if tas.vendor else ""
 
     if tid in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"):
         freight = tas.freight_in_amount or Decimal("0")
-        unit_cost_part = ""
-        if (
-            inventory_purchase_ctx is not None
-            and freight > 0
-            and inventory_purchase_ctx.get("allocated_unit_cost") is not None
-            and tas.inventory_link is not None
-        ):
-            qty = tas.inventory_link.quantity or 1
-            item_label = inventory_item_name or tas.inventory_link.name or "item"
-            if item_label.endswith("ies") and len(item_label) > 3:
-                singular_label = f"{item_label[:-3]}y"
-            elif item_label.endswith("s") and len(item_label) > 1:
-                singular_label = item_label[:-1]
-            else:
-                singular_label = item_label
-            each_label = singular_label if qty == 1 else item_label
-            unit_cost_part = (
-                f" Each {each_label} costs "
-                f"${inventory_purchase_ctx['allocated_unit_cost']:.2f} with shipping included."
-            )
-        if freight > 0:
-            item_cost = tas.total_amount - freight
-            cost_part = f"${item_cost:.2f} + ${freight:.2f} shipping = {amt} total"
+        ptax = tas.purchase_tax_amount or Decimal("0")
+        overhead = freight + ptax
+        n_items = len(purchase_items) if purchase_items else 0
+        if n_items == 1:
+            ctx = purchase_items[0]  # type: ignore[index]
+            items_part = f' "{ctx["item_name"]}" × {ctx["quantity"]}'
+        elif n_items > 1:
+            items_part = f" {n_items} SKUs"
+        else:
+            items_part = ""
+        if overhead > 0:
+            item_cost = tas.total_amount - overhead
+            extras = []
+            if freight > 0:
+                extras.append(f"${freight:.2f} shipping")
+            if ptax > 0:
+                extras.append(f"${ptax:.2f} tax")
+            cost_part = f"${item_cost:.2f} + {' + '.join(extras)} = {amt} total"
         else:
             cost_part = amt
-        items_part = f" {item_desc}" if item_desc else ""
         if tid == "BUY_INVENTORY_PERSONAL":
             return (
                 f"You bought{items_part} for {cost_part}{vendor_part} using personal funds. "
-                f"The business owes you {amt} back.{unit_cost_part}"
+                f"The business owes you {amt} back."
             )
         paid = f"your {payment_account_name}" if payment_account_name else "a business account"
-        return f"You bought{items_part} for {cost_part}{vendor_part} using {paid}.{unit_cost_part}"
+        return f"You bought{items_part} for {cost_part}{vendor_part} using {paid}."
 
     if tid == "SELL_INVENTORY_CASH":
         tax = tas.sales_tax_amount or Decimal("0")
@@ -1799,6 +2053,7 @@ def entry_preview_get(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     session = _load_session(conn, session_id)
+    session_receipt_files = [f for f in session.answers.get("receipt_files", []) if isinstance(f, dict)]
 
     if not is_complete(session):
         return RedirectResponse(
@@ -1835,12 +2090,22 @@ def entry_preview_get(
                 status_code=303,
             )
 
+    inventory_purchase_ctx: list[dict] = []
+    if tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"):
+        try:
+            inventory_purchase_ctx = _resolve_inventory_purchase_context(conn, tas)
+        except ValueError as exc:
+            return RedirectResponse(
+                url=f"/accounting/entry/step/{session_id}?error={quote(str(exc))}",
+                status_code=303,
+            )
+
     template = get_template(tas.template_id)
 
     # Build account_map (code → id) and id → (code, name) for reverse lookup
     acct_rows = conn.execute("SELECT id, code, name FROM accounts").fetchall()
     account_map: dict[str, int] = {r["code"]: r["id"] for r in acct_rows}
-    id_to_acct: dict[int, dict] = {r["id"]: r for r in acct_rows}
+    id_to_acct: dict[int, dict] = {r["id"]: {"code": r["code"], "name": r["name"]} for r in acct_rows}
 
     try:
         lines = resolve_lines(
@@ -1896,19 +2161,22 @@ def entry_preview_get(
     if tas.expense_category_account_id and tas.expense_category_account_id in id_to_acct:
         expense_account_name = id_to_acct[tas.expense_category_account_id].get("name")
 
-    inventory_item_name: Optional[str] = None
+    # inventory_purchase_ctx is now a list[dict]; build display data from it
+    purchase_items: list[dict] = []
+    inventory_item_name: Optional[str] = None  # kept for sale context
+
     if sale_inventory_ctx is not None:
         inventory_item_name = sale_inventory_ctx["item_name"]
-    elif inventory_purchase_ctx is not None:
-        inventory_item_name = inventory_purchase_ctx["item_name"]
-    elif tas.inventory_link and tas.inventory_link.mode == "link_existing" and tas.inventory_link.item_id:
-        row = conn.execute(
-            "SELECT name FROM items WHERE id=?", (tas.inventory_link.item_id,)
-        ).fetchone()
-        if row:
-            inventory_item_name = row["name"]
-    elif tas.inventory_link and tas.inventory_link.name:
-        inventory_item_name = tas.inventory_link.name
+    elif inventory_purchase_ctx:
+        purchase_items = [
+            {
+                "item_name": ctx["item_name"],
+                "quantity": ctx["quantity"],
+                "allocated_unit_cost": ctx["allocated_unit_cost"],
+                "allocated_total_cost": ctx["allocated_total_cost"],
+            }
+            for ctx in inventory_purchase_ctx
+        ]
 
     summary_text = _build_summary_text(
         tas,
@@ -1916,12 +2184,11 @@ def entry_preview_get(
         payment_account_name,
         expense_account_name,
         inventory_item_name,
-        inventory_purchase_ctx=inventory_purchase_ctx,
+        purchase_items=purchase_items,
     )
 
-    inventory_unit_cost: Optional[Decimal] = None
-    if inventory_purchase_ctx is not None:
-        inventory_unit_cost = inventory_purchase_ctx.get("allocated_unit_cost")
+    debit_total = sum(Decimal(ln["debit"]) for ln in enriched_lines)
+    credit_total = sum(Decimal(ln["credit"]) for ln in enriched_lines)
 
     return render(
         "accounting/entry_confirm.html", request,
@@ -1933,7 +2200,10 @@ def entry_preview_get(
         payment_account_name=payment_account_name,
         expense_account_name=expense_account_name,
         inventory_item_name=inventory_item_name,
-        inventory_unit_cost=inventory_unit_cost,
+        purchase_items=purchase_items,
+        debit_total=debit_total,
+        credit_total=credit_total,
+        session_receipt_files=session_receipt_files,
     )
 
 
@@ -2039,44 +2309,41 @@ def _insert_new_inventory_purchase_item(
 def _apply_inventory_purchase(
     tx_conn: sqlite3.Connection,
     req: PostEntryRequest,
-    purchase_ctx: dict,
-) -> int:
-    """Insert or update the purchased inventory item before posting the entry."""
-    if purchase_ctx["mode"] == "create_new":
-        item_id = _insert_new_inventory_purchase_item(
-            tx_conn,
-            name=purchase_ctx["item_name"],
-            quantity=purchase_ctx["quantity"],
-            unit_cost=purchase_ctx["allocated_unit_cost"],
-        )
-    else:
-        item_id = purchase_ctx["item_id"]
-        tx_conn.execute(
-            """
-            UPDATE items
-            SET qty_on_hand=?, unit_cost=?
-            WHERE id=? AND item_type='resale'
-            """,
-            (
-                float(purchase_ctx["new_qty"]),
-                float(purchase_ctx["weighted_unit_cost"]),
-                item_id,
-            ),
-        )
-
-    for ln in req.lines:
-        ln.inventory_item_id = item_id
-    return item_id
+    purchase_ctx: list[dict],
+) -> None:
+    """Insert or update all purchased inventory items before posting the entry."""
+    for ctx in purchase_ctx:
+        if ctx["mode"] == "create_new":
+            _insert_new_inventory_purchase_item(
+                tx_conn,
+                name=ctx["item_name"],
+                quantity=ctx["quantity"],
+                unit_cost=ctx["allocated_unit_cost"],
+            )
+        else:
+            tx_conn.execute(
+                """
+                UPDATE items
+                SET qty_on_hand=?, unit_cost=?
+                WHERE id=? AND item_type='resale'
+                """,
+                (
+                    float(ctx["new_qty"]),
+                    float(ctx["weighted_unit_cost"]),
+                    ctx["item_id"],
+                ),
+            )
 
 
 @router.post("/entry/confirm")
-async def entry_confirm(
+def entry_confirm(
     request: Request,
     session_id: str = Form(...),
     receipt: Optional[UploadFile] = File(None),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     session = _load_session(conn, session_id)
+    pre_uploaded = [f for f in session.answers.get("receipt_files", []) if isinstance(f, dict)]
 
     if not is_complete(session):
         return RedirectResponse(
@@ -2113,7 +2380,7 @@ async def entry_confirm(
                 status_code=303,
             )
 
-    inventory_purchase_ctx: Optional[dict] = None
+    inventory_purchase_ctx: list[dict] = []
     if tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"):
         try:
             inventory_purchase_ctx = _resolve_inventory_purchase_context(conn, tas)
@@ -2125,15 +2392,15 @@ async def entry_confirm(
 
     template = get_template(tas.template_id)
 
-    # Resolve inventory item (create if needed) before building lines
+    # Resolve inventory item id for the journal line (sale links to one item;
+    # multi-item purchases leave inventory_item_id None on the combined debit line).
     try:
-        inventory_item_id = (
-            sale_inventory_ctx["item_id"]
-            if sale_inventory_ctx is not None
-            else inventory_purchase_ctx["item_id"]
-            if inventory_purchase_ctx is not None
-            else _resolve_inventory_item_id(conn, tas)
-        )
+        if sale_inventory_ctx is not None:
+            inventory_item_id: Optional[int] = sale_inventory_ctx["item_id"]
+        elif inventory_purchase_ctx:
+            inventory_item_id = None  # multi-item: no single item to link
+        else:
+            inventory_item_id = _resolve_inventory_item_id(conn, tas)
     except Exception as exc:
         return RedirectResponse(
             url=f"/accounting/entry/preview/{session_id}?error={quote(str(exc))}",
@@ -2226,9 +2493,28 @@ async def entry_confirm(
             status_code=303,
         )
 
-    # Attach receipt if one was uploaded
-    if receipt and receipt.filename:
-        content = await receipt.read()
+    # Link receipts uploaded during the questionnaire step
+    for file_meta in pre_uploaded:
+        with conn:
+            conn.execute(
+                """
+                INSERT INTO receipts
+                  (entry_id, original_filename, stored_path, mime_type, file_size_bytes, sha256)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry_id,
+                    file_meta["original_filename"],
+                    file_meta["stored_path"],
+                    file_meta["mime_type"],
+                    file_meta["file_size_bytes"],
+                    file_meta["sha256"],
+                ),
+            )
+
+    # Attach a receipt uploaded on the confirm screen (only when none pre-uploaded)
+    if not pre_uploaded and receipt and receipt.filename:
+        content = receipt.file.read()
         if content:
             sha256 = hashlib.sha256(content).hexdigest()
             ext = Path(receipt.filename).suffix.lower()

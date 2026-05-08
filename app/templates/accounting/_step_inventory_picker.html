@@ -1,4 +1,5 @@
 <style>
+  /* ── Shared ── */
   .q-inv-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
   .q-inv-tab {
     padding: 8px 18px;
@@ -17,9 +18,7 @@
   }
   .q-inv-panel { display: none; }
   .q-inv-panel.visible { display: block; }
-  .q-inv-search {
-    margin-bottom: 10px;
-  }
+  .q-inv-search { margin-bottom: 10px; }
   .q-inv-list {
     display: flex;
     flex-direction: column;
@@ -58,20 +57,134 @@
   .q-inv-qty { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
   .q-inv-qty label { font-size: 0.82rem; font-weight: 600; color: var(--rs-muted); white-space: nowrap; }
   .q-inv-qty input { width: 80px; }
+
+  /* ── Multi-item purchase UI ── */
+  .q-multi-shell { display: flex; flex-direction: column; gap: 12px; }
+  .q-item-row {
+    border: 1px solid var(--rs-border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: var(--rs-surface);
+    position: relative;
+  }
+  .q-item-row-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .q-item-row-num {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--rs-muted);
+  }
+  .q-item-remove-btn {
+    background: none;
+    border: none;
+    color: var(--rs-muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  .q-item-remove-btn:hover { background: #fde; color: #c00; }
+  .q-row-mode-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
+  .q-row-mode-tab {
+    padding: 5px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--rs-border);
+    background: var(--rs-surface);
+    color: var(--rs-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .q-row-mode-tab.active {
+    background: rgba(47, 143, 115, 0.12);
+    border-color: var(--rs-accent);
+    color: var(--rs-accent-strong);
+  }
+  .q-row-select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--rs-border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--rs-text);
+    background: #fcfffd;
+    margin-bottom: 8px;
+  }
+  .q-row-select:focus { outline: none; border-color: var(--rs-accent); }
+  .q-row-new-name {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--rs-border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: var(--rs-text);
+    background: #fcfffd;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+  }
+  .q-row-new-name:focus { outline: none; border-color: var(--rs-accent); }
+  .q-row-fields {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .q-row-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .q-row-field-group label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--rs-muted);
+  }
+  .q-row-field-group input {
+    padding: 7px 10px;
+    border: 1px solid var(--rs-border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: #fcfffd;
+  }
+  .q-row-field-group input:focus { outline: none; border-color: var(--rs-accent); }
+  .q-add-item-btn {
+    width: 100%;
+    padding: 10px;
+    border: 1px dashed var(--rs-accent);
+    border-radius: 10px;
+    background: rgba(47, 143, 115, 0.04);
+    color: var(--rs-accent);
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .q-add-item-btn:hover { background: rgba(47, 143, 115, 0.10); }
+  .q-multi-subtotal {
+    margin-top: 10px;
+    font-size: 0.88rem;
+    color: var(--rs-muted);
+    text-align: right;
+  }
+  .q-multi-subtotal strong { color: var(--rs-text); font-size: 1rem; }
 </style>
 
 <input type="hidden" name="answer" id="q-inv-answer" value="" />
 
 {% set sale_only = step.id == 'inventory_link_sale' %}
 
-{% if not sale_only %}
+{% if sale_only %}
+{# ── Sale mode: single-item radio list ── #}
 <div class="q-inv-tabs">
-  <button type="button" class="q-inv-tab active" id="q-tab-link" onclick="switchTab('link')">Link existing</button>
-  <button type="button" class="q-inv-tab" id="q-tab-new" onclick="switchTab('new')">Create new item</button>
+  <button type="button" class="q-inv-tab active" disabled>Select item to sell</button>
 </div>
-{% endif %}
 
-{# ── Link existing panel ── #}
 <div class="q-inv-panel visible" id="q-panel-link">
   {% if inventory_items %}
   <div class="rs-field q-inv-search">
@@ -87,25 +200,9 @@
     {% endfor %}
   </div>
   {% else %}
-  <p class="q-help" style="margin:0;">
-    {% if sale_only %}
-    No inventory items with quantity on hand are available to sell yet.
-    {% else %}
-    No inventory items yet — use "Create new item" to add one.
-    {% endif %}
-  </p>
+  <p class="q-help" style="margin:0;">No inventory items with quantity on hand are available to sell yet.</p>
   {% endif %}
 </div>
-
-{% if not sale_only %}
-{# ── Create new panel ── #}
-<div class="q-inv-panel" id="q-panel-new">
-  <div class="rs-field" style="margin-bottom: 10px;">
-    <label style="font-size:0.82rem; font-weight:600; color:var(--rs-muted);">Item name</label>
-    <input type="text" id="q-new-name" placeholder="e.g. Funko Pop — Batman #234" />
-  </div>
-</div>
-{% endif %}
 
 <div class="q-inv-qty">
   <label for="q-inv-qty-input">Quantity</label>
@@ -114,25 +211,11 @@
 
 <script>
 (function() {
-  var saleOnly = {{ "true" if sale_only else "false" }};
-  var mode = "link";
-
-  window.switchTab = function(tab) {
-    if (saleOnly) return;
-    mode = tab;
-    document.getElementById("q-panel-link").className = "q-inv-panel" + (tab === "link" ? " visible" : "");
-    document.getElementById("q-panel-new").className  = "q-inv-panel" + (tab === "new"  ? " visible" : "");
-    document.getElementById("q-tab-link").className = "q-inv-tab" + (tab === "link" ? " active" : "");
-    document.getElementById("q-tab-new").className  = "q-inv-tab" + (tab === "new"  ? " active" : "");
-    document.getElementById("q-inv-answer").value = "";
-  };
-
   window.selectItem = function(itemId) {
     var qty = parseInt(document.getElementById("q-inv-qty-input").value) || 1;
     document.getElementById("q-inv-answer").value = JSON.stringify({
       mode: "link_existing", item_id: itemId, quantity: qty
     });
-    // highlight selected row
     var items = document.querySelectorAll(".q-inv-item");
     items.forEach(function(el) { el.classList.remove("selected"); });
     var radio = document.querySelector("[name='_item_radio']:checked");
@@ -142,43 +225,173 @@
   window.filterItems = function() {
     var q = document.getElementById("q-inv-search").value.toLowerCase();
     document.querySelectorAll(".q-inv-item").forEach(function(el) {
-      var match = (el.dataset.name + " " + el.dataset.sku).includes(q);
-      el.style.display = match ? "" : "none";
+      el.style.display = (el.dataset.name + " " + el.dataset.sku).includes(q) ? "" : "none";
     });
   };
 
-  // Rebuild answer before form submit
   document.getElementById("q-answer").addEventListener("submit", function(e) {
     var qty = parseInt(document.getElementById("q-inv-qty-input").value) || 1;
-    if (mode === "link") {
-      var radio = document.querySelector("[name='_item_radio']:checked");
-      if (!radio) {
-        e.preventDefault();
-        alert(
-          saleOnly
-            ? "Please select an inventory item to sell."
-            : 'Please select an inventory item or switch to "Create new item".'
-        );
-        return;
-      }
-      document.getElementById("q-inv-answer").value = JSON.stringify({
-        mode: "link_existing", item_id: parseInt(radio.value), quantity: qty
-      });
-    } else {
-      if (saleOnly) {
-        e.preventDefault();
-        return;
-      }
-      var name = document.getElementById("q-new-name").value.trim();
-      if (!name) {
-        e.preventDefault();
-        alert("Please enter a name for the new item.");
-        return;
-      }
-      document.getElementById("q-inv-answer").value = JSON.stringify({
-        mode: "create_new", name: name, quantity: qty
-      });
+    var radio = document.querySelector("[name='_item_radio']:checked");
+    if (!radio) {
+      e.preventDefault();
+      alert("Please select an inventory item to sell.");
+      return;
     }
+    document.getElementById("q-inv-answer").value = JSON.stringify({
+      mode: "link_existing", item_id: parseInt(radio.value), quantity: qty
+    });
   });
 })();
 </script>
+
+{% else %}
+{# ── Purchase mode: multi-item builder ── #}
+
+{# Embed inventory items as JSON for JS use #}
+<script>
+var Q_INV_ITEMS = [
+  {% for item in inventory_items %}
+  {"id": {{ item['id'] }}, "sku": {{ (item['sku'] or '') | tojson }}, "name": {{ item['name'] | tojson }}}{% if not loop.last %},{% endif %}
+  {% endfor %}
+];
+</script>
+
+<div class="q-multi-shell" id="q-multi-shell">
+  {# First row rendered by JS on load #}
+</div>
+
+<button type="button" class="q-add-item-btn" id="q-add-btn" onclick="addItemRow()">+ Add another item</button>
+
+<div class="q-multi-subtotal">
+  Subtotal: <strong>$<span id="q-subtotal-display">0.00</span></strong>
+  <span style="font-size:0.78rem;">(+ freight you'll enter next if applicable)</span>
+</div>
+
+<script>
+(function() {
+  var rows = [];
+  var rowCount = 0;
+
+  function buildItemOptions() {
+    var opts = '<option value="">-- Select existing item --</option>';
+    Q_INV_ITEMS.forEach(function(item) {
+      var label = item.sku ? '[' + item.sku + '] ' + item.name : item.name;
+      opts += '<option value="' + item.id + '">' + label + '</option>';
+    });
+    return opts;
+  }
+
+  function createRow() {
+    rowCount++;
+    var rowId = 'q-row-' + rowCount;
+    var div = document.createElement('div');
+    div.className = 'q-item-row';
+    div.id = rowId;
+    div.innerHTML =
+      '<div class="q-item-row-head">' +
+        '<span class="q-item-row-num">Item ' + rowCount + '</span>' +
+        '<button type="button" class="q-item-remove-btn" onclick="removeRow(\'' + rowId + '\')">Remove</button>' +
+      '</div>' +
+      '<div class="q-row-mode-tabs">' +
+        '<button type="button" class="q-row-mode-tab active" onclick="setRowMode(\'' + rowId + '\', \'existing\', this)">Existing item</button>' +
+        '<button type="button" class="q-row-mode-tab" onclick="setRowMode(\'' + rowId + '\', \'new\', this)">New item</button>' +
+      '</div>' +
+      '<div class="q-row-existing-panel">' +
+        '<select class="q-row-select" onchange="updateTotal()">' + buildItemOptions() + '</select>' +
+      '</div>' +
+      '<div class="q-row-new-panel" style="display:none">' +
+        '<input type="text" class="q-row-new-name" placeholder="Item name (e.g. Batman Funko #234)" oninput="updateTotal()" />' +
+      '</div>' +
+      '<div class="q-row-fields">' +
+        '<div class="q-row-field-group">' +
+          '<label>Quantity</label>' +
+          '<input type="number" class="q-row-qty" min="1" value="1" style="width:80px" oninput="updateTotal()" />' +
+        '</div>' +
+        '<div class="q-row-field-group">' +
+          '<label>Unit cost ($)</label>' +
+          '<input type="number" class="q-row-cost" min="0" step="0.0001" placeholder="0.0000" style="width:120px" oninput="updateTotal()" />' +
+        '</div>' +
+      '</div>';
+    rows.push(rowId);
+    return div;
+  }
+
+  window.addItemRow = function() {
+    var shell = document.getElementById('q-multi-shell');
+    shell.appendChild(createRow());
+    updateRemoveButtons();
+  };
+
+  window.removeRow = function(rowId) {
+    var el = document.getElementById(rowId);
+    if (el) el.remove();
+    rows = rows.filter(function(r) { return r !== rowId; });
+    updateRemoveButtons();
+    updateTotal();
+  };
+
+  window.setRowMode = function(rowId, mode, btn) {
+    var row = document.getElementById(rowId);
+    row.querySelector('.q-row-existing-panel').style.display = mode === 'existing' ? '' : 'none';
+    row.querySelector('.q-row-new-panel').style.display     = mode === 'new'      ? '' : 'none';
+    row.querySelectorAll('.q-row-mode-tab').forEach(function(b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    updateTotal();
+  };
+
+  function updateRemoveButtons() {
+    var allRows = document.querySelectorAll('.q-item-row');
+    allRows.forEach(function(row) {
+      var btn = row.querySelector('.q-item-remove-btn');
+      if (btn) btn.style.display = allRows.length > 1 ? '' : 'none';
+    });
+  }
+
+  window.updateTotal = function() {
+    var total = 0;
+    document.querySelectorAll('.q-item-row').forEach(function(row) {
+      var qty  = parseFloat(row.querySelector('.q-row-qty').value)  || 0;
+      var cost = parseFloat(row.querySelector('.q-row-cost').value) || 0;
+      total += qty * cost;
+    });
+    document.getElementById('q-subtotal-display').textContent = total.toFixed(2);
+  };
+
+  function serializeRows() {
+    var items = [];
+    var ok = true;
+    document.querySelectorAll('.q-item-row').forEach(function(row) {
+      var existingPanel = row.querySelector('.q-row-existing-panel');
+      var isExisting = existingPanel.style.display !== 'none';
+      var qty  = parseInt(row.querySelector('.q-row-qty').value)  || 1;
+      var cost = row.querySelector('.q-row-cost').value.trim();
+      if (!cost) { ok = false; return; }
+      if (isExisting) {
+        var sel = row.querySelector('.q-row-select');
+        var itemId = sel.value ? parseInt(sel.value) : null;
+        if (!itemId) { ok = false; return; }
+        items.push({ mode: 'link_existing', item_id: itemId, quantity: qty, unit_cost: cost });
+      } else {
+        var name = row.querySelector('.q-row-new-name').value.trim();
+        if (!name) { ok = false; return; }
+        items.push({ mode: 'create_new', name: name, quantity: qty, unit_cost: cost });
+      }
+    });
+    return ok ? items : null;
+  }
+
+  document.getElementById("q-answer").addEventListener("submit", function(e) {
+    var items = serializeRows();
+    if (!items || items.length === 0) {
+      e.preventDefault();
+      alert("Please add at least one item with a quantity and unit cost.");
+      return;
+    }
+    document.getElementById("q-inv-answer").value = JSON.stringify(items);
+  });
+
+  // Initialize with one row
+  addItemRow();
+})();
+</script>
+{% endif %}

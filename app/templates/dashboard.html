@@ -1,33 +1,343 @@
 {% extends "base.html" %}
+
+{% block extra_css %}
+<style>
+  /* ── Dashboard layout ──────────────────────────────────────────── */
+  .db-page      { max-width: var(--ss-page-max); margin: 0 auto; }
+  .db-ledger    { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; }
+  .db-col       { display: grid; gap: 14px; align-content: start; }
+  .db-two-col   { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+
+  /* ── Cards ─────────────────────────────────────────────────────── */
+  .db-card {
+    background: var(--ss-surface);
+    border: 1px solid var(--ss-border);
+    border-radius: 18px;
+    box-shadow: var(--ss-shadow-card);
+    padding: 18px;
+  }
+  .db-hero {
+    background: linear-gradient(135deg, var(--ss-surface) 0%, var(--ss-surface-deep) 100%);
+    border-radius: 22px;
+  }
+
+  /* ── Typography helpers ─────────────────────────────────────────── */
+  .db-eyebrow {
+    font-size: 0.78rem; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ss-muted);
+  }
+  .db-display {
+    font-family: var(--ss-font-display); font-weight: 600;
+    font-size: 3.5rem; line-height: 1; letter-spacing: -0.04em;
+  }
+  .db-kpi {
+    font-family: var(--ss-font-display); font-weight: 600;
+    font-size: 2rem; line-height: 1; letter-spacing: -0.03em;
+  }
+
+  /* ── Row components ─────────────────────────────────────────────── */
+  .db-account-row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 14px; align-items: center;
+    padding: 10px 12px; border-radius: 12px;
+    background: var(--ss-surface-alt);
+  }
+  .db-entry-row {
+    display: grid;
+    grid-template-columns: 92px 1fr 110px 90px;
+    gap: 14px; align-items: center;
+    padding: 12px 14px; border-radius: 12px;
+    background: var(--ss-surface-alt);
+  }
+
+  /* ── Action buttons ─────────────────────────────────────────────── */
+  .db-action-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .db-action {
+    display: grid; gap: 3px; padding: 14px;
+    background: var(--ss-surface); color: var(--ss-text);
+    border: 1px solid var(--ss-border); border-radius: 14px;
+    cursor: pointer; text-align: left; font-family: inherit;
+    text-decoration: none;
+    transition: background var(--ss-dur-fast) var(--ss-ease);
+  }
+  .db-action:hover  { background: var(--ss-surface-alt); }
+  .db-action.accent { background: var(--ss-accent); color: #f6fffb; border-color: var(--ss-accent); }
+  .db-action.accent:hover { background: var(--ss-accent-strong); }
+
+  /* ── Pills ──────────────────────────────────────────────────────── */
+  .db-pill {
+    display: inline-flex; align-items: center;
+    padding: 5px 10px; border-radius: 999px;
+    font-size: 0.8rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .db-pill-green { background: rgba(47,143,115,0.15); color: var(--ss-accent-strong); }
+  .db-pill-muted { background: rgba(94,125,115,0.12); color: var(--ss-muted); }
+  .db-pill-warn  { background: rgba(140,109,31,0.12); color: var(--ss-warn); }
+
+  /* ── Nag strip ──────────────────────────────────────────────────── */
+  .db-nag {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 10px 14px; margin-bottom: 14px;
+    background: rgba(140,109,31,0.08);
+    border: 1px solid rgba(140,109,31,0.25);
+    border-radius: 14px; color: var(--ss-warn); font-size: 13px;
+  }
+
+  /* ── Mono numbers ───────────────────────────────────────────────── */
+  .mono { font-family: var(--ss-font-mono); font-variant-numeric: tabular-nums; }
+
+  /* ── Responsive ─────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .db-ledger  { grid-template-columns: 1fr; }
+    .db-two-col { grid-template-columns: 1fr; }
+    .db-entry-row { grid-template-columns: 80px 1fr 100px; }
+    .db-entry-row .db-entry-receipt { display: none; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<h1>Salt Stocks</h1>
+<div class="db-page">
 
-<div class="card" style="margin-bottom: 16px;">
-  <h3>Owner Reimbursement</h3>
-  <div style="font-size: 2rem; font-weight: 700; line-height: 1; margin: 8px 0 10px;">
-    ${{ "%.2f"|format(owner_reimbursement_balance) }}
+{# ─── Needs-attention strip (only when nags exist, dismissible) ───── #}
+{% if nags %}
+<div class="db-nag" id="db-nag-strip">
+  <strong style="font-size:0.7rem; letter-spacing:0.07em; text-transform:uppercase; flex-shrink:0;">Needs attention</strong>
+  {% for nag in nags %}
+  <span>
+    <strong>{{ nag.label }}:</strong>
+    <a href="{{ nag.action_url }}" style="color:var(--ss-warn); text-decoration:underline;">{{ nag.action_label }}</a>
+  </span>
+  {% endfor %}
+  <button onclick="dismissNag()" aria-label="Dismiss"
+    style="margin-left:auto; background:none; border:none; color:var(--ss-warn); cursor:pointer; font-size:1.1rem; line-height:1; padding:0 2px; flex-shrink:0;">✕</button>
+</div>
+{% endif %}
+
+{# ─── Ledger split ─────────────────────────────────────────────────── #}
+<div class="db-ledger">
+
+  {# ── Left column: money ─── #}
+  <div class="db-col">
+
+    {# Hero: Owed back to you #}
+    <div class="db-card db-hero">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;">
+        <div>
+          <div class="db-eyebrow">Owed back to you</div>
+          <div style="font-size:0.85rem; color:var(--ss-muted); margin-top:4px;">Personal funds the business hasn't repaid yet</div>
+        </div>
+        <a href="/accounting/owner-balance"
+           style="color:var(--ss-accent-strong); font-size:13px; font-weight:600; text-decoration:none; white-space:nowrap; margin-left:12px;">See ledger →</a>
+      </div>
+
+      <div class="db-display" style="color:{% if owner_reimbursement_balance >= 0 %}var(--ss-accent-strong){% else %}var(--ss-danger){% endif %}; margin:10px 0 8px;">
+        {% if owner_reimbursement_balance < 0 %}−{% endif %}${{ "%.2f"|format(owner_reimbursement_balance|abs) }}
+      </div>
+
+      <div style="display:flex; gap:22px; font-size:13px; color:var(--ss-muted); margin-bottom:16px; flex-wrap:wrap;">
+        <span>Contributions <strong style="color:var(--ss-text);" class="mono">${{ "%.2f"|format(contributions_total) }}</strong></span>
+        <span>− Draws <strong style="color:var(--ss-text);" class="mono">${{ "%.2f"|format(draws_total) }}</strong></span>
+      </div>
+
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <a href="/accounting/entry/start?template_id=REIMBURSE_OWNER&prefill_owner_balance=1"
+           class="btn btn-primary" style="text-decoration:none;">Reimburse myself</a>
+        <a href="/accounting/entry/start"
+           class="btn btn-ghost" style="text-decoration:none;">Log a contribution</a>
+      </div>
+    </div>
+
+    {# KPI row: Net income + Sales tax #}
+    <div class="db-two-col">
+
+      <div class="db-card">
+        <div class="db-eyebrow">Net income · {{ month_name }}</div>
+        <div style="display:flex; align-items:baseline; gap:10px; margin-top:8px; flex-wrap:wrap;">
+          <span class="db-kpi" style="color:{% if net_income_mtd >= 0 %}var(--ss-accent-strong){% else %}var(--ss-danger){% endif %};">
+            {% if net_income_mtd < 0 %}−{% endif %}${{ "%.2f"|format(net_income_mtd|abs) }}
+          </span>
+          {% if trend_pct is not none %}
+          <span style="font-weight:700; font-size:13px; color:{% if trend_pct >= 0 %}var(--ss-accent-strong){% else %}var(--ss-danger){% endif %};">
+            {% if trend_pct >= 0 %}▲{% else %}▼{% endif %} {{ trend_pct|abs }}%
+          </span>
+          {% endif %}
+        </div>
+        <div style="margin-top:6px; font-size:13px; color:var(--ss-muted);">YTD ${{ "%.2f"|format(net_income_ytd) }}</div>
+      </div>
+
+      <div class="db-card">
+        <div class="db-eyebrow">Sales tax payable</div>
+        <div class="db-kpi" style="color:{% if sales_tax_payable > 0 %}var(--ss-warn){% else %}var(--ss-muted){% endif %}; margin-top:8px;">
+          ${{ "%.2f"|format(sales_tax_payable) }}
+        </div>
+        <div style="margin-top:6px; font-size:13px; color:var(--ss-muted);">Collected − remitted</div>
+        {% if sales_tax_payable > 0 %}
+        <a href="/accounting/entry/start"
+           class="btn btn-ghost"
+           style="text-decoration:none; display:inline-flex; align-items:center; margin-top:10px; min-height:32px; font-size:12px; padding:0 14px; white-space:nowrap;">
+          Pay state
+        </a>
+        {% endif %}
+      </div>
+
+    </div>
+
+    {# Cash & accounts #}
+    <div class="db-card">
+      <h2 style="margin:0 0 12px;">Cash &amp; accounts</h2>
+      <div style="display:grid; gap:8px;">
+        {% for acct in cash_accounts %}
+        <div class="db-account-row">
+          <div>
+            <div style="font-weight:600; font-size:14px;">{{ acct.name }}</div>
+            <div style="font-size:12px; color:var(--ss-muted);">{{ acct.subtype | replace('_', ' ') }}</div>
+          </div>
+          <div class="mono" style="font-weight:700; color:{% if acct.is_liability %}var(--ss-danger){% else %}var(--ss-text){% endif %};">
+            {% if acct.is_liability %}−{% endif %}${{ "%.2f"|format(acct.balance|abs) }}
+          </div>
+        </div>
+        {% else %}
+        <p style="margin:0; font-size:13px; color:var(--ss-muted);">No account activity yet. Add an entry to get started.</p>
+        {% endfor %}
+      </div>
+    </div>
+
+  </div>{# end left col #}
+
+  {# ── Right column: things ─── #}
+  <div class="db-col">
+
+    {# Inventory snapshot #}
+    <div class="db-card">
+      <div class="db-eyebrow">Inventory</div>
+      <div class="db-kpi" style="color:var(--ss-accent-strong); margin-top:8px;">${{ "%.2f"|format(inventory_value) }}</div>
+      <div style="margin-top:6px; font-size:13px; color:var(--ss-muted);">{{ resale_count }} items total</div>
+      <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+        <span class="db-pill db-pill-green">{{ listed }}&nbsp;listed</span>
+        <span class="db-pill db-pill-muted">{{ unlisted }}&nbsp;unlisted</span>
+        {% if low_qty > 0 %}
+        <span class="db-pill db-pill-warn">{{ low_qty }}&nbsp;out of stock</span>
+        {% endif %}
+      </div>
+    </div>
+
+    {# To-Do list (nag action buttons — only when nags exist) #}
+    {% if nags %}
+    <div class="db-card">
+      <h2 style="margin:0 0 12px;">Needs attention</h2>
+      <div style="display:grid; gap:8px;">
+        {% for nag in nags %}
+        <a href="{{ nag.action_url }}" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">{{ nag.action_label }}</span>
+          <span style="font-size:12px; color:var(--ss-muted);">{{ nag.label }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# Quick actions #}
+    <div class="db-card">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px;">
+        <h2 style="margin:0;">Do something</h2>
+        <span style="font-size:13px; color:var(--ss-muted);">One tap → questionnaire</span>
+      </div>
+      <div class="db-action-grid">
+        <a href="/accounting/entry/start" class="db-action accent" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Add Entry</span>
+          <span style="font-size:12px; color:rgba(246,255,251,0.85);">Questionnaire · ~30s</span>
+        </a>
+        <a href="/accounting/entry/start?template_id=REIMBURSE_OWNER&prefill_owner_balance=1" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Reimburse myself</span>
+          <span style="font-size:12px; color:var(--ss-muted);">Pay personal funds back</span>
+        </a>
+        <a href="/accounting/entry/start?template_id=BUY_INVENTORY_PERSONAL" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Bought inventory</span>
+          <span style="font-size:12px; color:var(--ss-muted);">Personal or business funds</span>
+        </a>
+        <a href="/accounting/entry/start?template_id=SELL_INVENTORY_CASH" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Record a sale</span>
+          <span style="font-size:12px; color:var(--ss-muted);">Manual / non-eBay</span>
+        </a>
+        <a href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Business expense</span>
+          <span style="font-size:12px; color:var(--ss-muted);">Hotel, supplies, fees</span>
+        </a>
+        <a href="/ebay/import" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Sync eBay orders</span>
+          <span style="font-size:12px; color:var(--ss-muted);">Dry run first</span>
+        </a>
+        <a href="/accounting/receipts" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Receipt vault</span>
+          <span style="font-size:12px; color:var(--ss-muted);">{% if missing_receipts > 0 %}{{ missing_receipts }} missing{% else %}All up to date{% endif %}</span>
+        </a>
+        <a href="/resale/new" class="db-action" style="text-decoration:none;">
+          <span style="font-weight:700; font-size:14px;">Add item</span>
+          <span style="font-size:12px; color:var(--ss-muted);">Auto SKU</span>
+        </a>
+      </div>
+    </div>
+
+  </div>{# end right col #}
+
+</div>{# end ledger #}
+
+{# ─── Recent entries (full width) ─────────────────────────────────── #}
+<div class="db-card" style="margin-top:14px;">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:12px;">
+    <h2 style="margin:0;">Recent entries</h2>
+    <a href="/accounting" style="color:var(--ss-accent-strong); font-size:13px; font-weight:600; text-decoration:none;">See all →</a>
   </div>
-  <p class="muted" style="margin-top: 0;">
-    Personal funds used for the business minus owner draws.
-  </p>
-  <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <a href="/accounting/owner-balance" class="btn" style="text-decoration:none;">View details</a>
-    <a href="/accounting/entry/start?template_id=REIMBURSE_OWNER&prefill_owner_balance=1" class="btn btn-primary" style="text-decoration:none;">Reimburse myself</a>
+
+  {% if recent_entries %}
+  <div style="display:grid; gap:8px;">
+    {% for entry in recent_entries %}
+    <div class="db-entry-row">
+      <span class="mono" style="font-size:12px; color:var(--ss-muted);">{{ entry.date }}</span>
+      <div>
+        <div style="font-weight:600; font-size:14px;">{{ entry.desc }}</div>
+        <div style="font-size:12px; color:var(--ss-muted);">{{ entry.template_id | replace('_', ' ') | title }}</div>
+      </div>
+      <span class="mono" style="font-weight:700;">${{ "%.2f"|format(entry.amount) }}</span>
+      <div class="db-entry-receipt" style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+        {% if not entry.has_receipt %}
+        <span style="font-size:12px; color:var(--ss-warn);">no receipt</span>
+        {% endif %}
+        <a href="/accounting/entries/{{ entry.id }}"
+           style="color:var(--ss-accent-strong); font-size:13px; font-weight:600; text-decoration:none;">open →</a>
+      </div>
+    </div>
+    {% endfor %}
   </div>
+  {% else %}
+  <p style="margin:0; font-size:13px; color:var(--ss-muted);">No entries yet. Use "Add Entry" to record your first transaction.</p>
+  {% endif %}
 </div>
 
-<div class="card">
-  <h3>Quick stats</h3>
-  <ul>
-    <li>Total resale items: <b>{{ resale_count }}</b></li>
-    <li>Unlisted resale items: <b>{{ unlisted }}</b></li>
-    <li>Out-of-stock resale rows (qty <= 0): <b>{{ low_qty }}</b></li>
-  </ul>
-
+{# ─── Backup (tucked away) ─────────────────────────────────────────── #}
+<div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--ss-border); display:flex; align-items:center; gap:12px;">
   <form method="post" action="/backup">
-    <button class="btn btn-primary" type="submit">Backup Now</button>
-    <span class="muted">Creates a timestamped copy of your database in <code>data/backups</code>.</span>
+    <button class="btn btn-ghost" type="submit" style="font-size:13px; min-height:34px; padding:0 14px;">Backup Now</button>
   </form>
+  <span style="font-size:13px; color:var(--ss-muted);">Creates a timestamped copy of your database in <code>data/backups</code>.</span>
 </div>
 
+</div>{# end db-page #}
+
+<script>
+  function dismissNag() {
+    var el = document.getElementById('db-nag-strip');
+    if (el) { el.style.display = 'none'; }
+    try { sessionStorage.setItem('ss-nag-dismissed', '1'); } catch(e) {}
+  }
+  try {
+    if (sessionStorage.getItem('ss-nag-dismissed') === '1') {
+      var el = document.getElementById('db-nag-strip');
+      if (el) el.style.display = 'none';
+    }
+  } catch(e) {}
+</script>
 {% endblock %}

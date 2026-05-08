@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<link rel="stylesheet" href="/static/css/accounting.css" />
+{% endblock %}
+
+{% block content %}
+<div class="ac-page">
+  <div class="ac-page-header">
+    <div>
+      <h1>AI Settings</h1>
+      <div class="ac-detail-value ac-report-meta">
+        Configure natural-language entry parsing via the Anthropic API.
+      </div>
+    </div>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← Entries</a>
+  </div>
+
+  {% if saved %}
+  <div class="ac-banner ac-banner-success">
+    <b>Saved.</b> AI settings updated.
+  </div>
+  {% endif %}
+
+  {% include "accounting/_reports_nav.html" %}
+
+  <div class="rs-card rs-form-shell" style="padding: 24px 26px; max-width: 520px;">
+    <form method="post" action="/accounting/settings/ai">
+
+      <div class="rs-field" style="margin-bottom: 20px;">
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+          <input
+            type="checkbox"
+            name="ai_enabled"
+            value="1"
+            {% if ai_enabled %}checked{% endif %}
+            style="width: 18px; height: 18px; accent-color: var(--rs-accent);"
+          />
+          <span style="font-weight: 600;">Enable AI assist on new-entry screen</span>
+        </label>
+        <div class="ac-detail-value" style="margin-top: 6px; padding-left: 28px;">
+          When enabled, a text box appears on the entry chooser so you can describe
+          a transaction in plain English. Requires an Anthropic API key below.
+        </div>
+      </div>
+
+      <div class="rs-field" style="margin-bottom: 24px;">
+        <label>Anthropic API Key</label>
+        <input
+          type="password"
+          name="anthropic_api_key"
+          placeholder="{{ '••••••••  (key already saved)' if has_api_key else 'sk-ant-…' }}"
+          autocomplete="off"
+          style="font-family: ui-monospace, monospace; font-size: 0.88rem;"
+        />
+        <div class="ac-detail-value" style="margin-top: 5px;">
+          Leave blank to keep the existing key.
+          The key is stored locally in your SaltStocks database and is never sent
+          anywhere except Anthropic's API.
+          <br>
+          Get a key at
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener"
+             style="color: var(--rs-accent);">console.anthropic.com</a>.
+        </div>
+      </div>
+
+      <div class="ac-form-actions">
+        <button class="rs-btn rs-btn-primary" type="submit">Save</button>
+      </div>
+    </form>
+  </div>
+
+</div>
+{% endblock %}

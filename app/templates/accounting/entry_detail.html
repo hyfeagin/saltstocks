@@ -122,8 +122,8 @@
       <tfoot>
         <tr style="font-weight: 700; border-top: 2px solid var(--ss-border);">
           <td colspan="2" style="text-align: right; color: var(--ss-muted); font-size: var(--ss-fs-help); padding-left: 20px;">Totals</td>
-          <td class="ac-table-num">${{ lines | sum(attribute='debit') | float | round(2) }}</td>
-          <td class="ac-table-num">${{ lines | sum(attribute='credit') | float | round(2) }}</td>
+          <td class="ac-table-num">${{ "%.2f"|format(debit_total) }}</td>
+          <td class="ac-table-num">${{ "%.2f"|format(credit_total) }}</td>
           <td style="padding-right: 20px;"></td>
         </tr>
       </tfoot>

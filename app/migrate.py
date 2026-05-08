@@ -412,6 +412,16 @@ def migrate():
             )
             """)
 
+        # ── App Settings (key/value store) ───────────────────────────────────
+        if not table_exists(conn, "app_settings"):
+            conn.execute("""
+            CREATE TABLE app_settings (
+              key         TEXT PRIMARY KEY,
+              value       TEXT NOT NULL DEFAULT '',
+              updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
         # Backfill company default for existing rows:
         # resale -> GV, material -> UM (reasonable default)
         conn.execute("""

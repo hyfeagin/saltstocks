@@ -154,6 +154,73 @@ Include: **TOTAL OWED TO HOLLY**
 
 ## Feature Backlog
 
+### [ ] Split Purchase Flow — Mixed Inventory + Expense on One Receipt
+
+**Phase 6 feature (post-MVP)**
+
+Add support for a single receipt that covers both inventory and non-inventory items (e.g. bought Funko Pops AND a roll of bubble wrap on the same order).
+
+**New step in BUY_INVENTORY flow:**
+
+Step 4 (new): "Was anything else on this receipt NOT for inventory?"
+- ☑️ No, everything was inventory (continue normally)
+- ☑️ Yes, I also bought... (opens a sub-flow)
+
+**If "Yes" — show split fields:**
+- ☐ Shipping supplies: $____
+- ☐ Office supplies: $____
+- ☐ Software/subscriptions: $____
+- ☐ Other expense: $____
+
+**Validation:** sum of splits must equal total amount.
+
+**Posting:** one journal entry with multiple debit lines (inventory + each expense category), single credit line (payment account or Owner Contributions).
+
+**Implementation sketch:**
+```python
+# In posting.py
+def post_split_entry(answer_set):
+    entry = JournalEntry(
+        date=answer_set.entry_date,
+        description=f"{answer_set.vendor} - split purchase",
+        total_amount=answer_set.total_amount
+    )
+
+    lines = []
+
+    # Inventory portion
+    lines.append(JournalLine(
+        account_id=INVENTORY_ACCOUNT,
+        debit=answer_set.inventory_amount,
+        memo="Inventory for resale"
+    ))
+
+    # Shipping supplies portion (if any)
+    if answer_set.shipping_supplies_amount:
+        lines.append(JournalLine(
+            account_id=SHIPPING_SUPPLIES_ACCOUNT,
+            debit=answer_set.shipping_supplies_amount,
+            memo="Shipping supplies"
+        ))
+
+    # Credit side (always Owner Contributions for personal funds)
+    lines.append(JournalLine(
+        account_id=OWNER_CONTRIBUTIONS_ACCOUNT,
+        credit=answer_set.total_amount
+    ))
+
+    # Validate balance
+    assert sum(l.debit for l in lines) == sum(l.credit for l in lines)
+
+    # Write atomically
+    db.add(entry)
+    for line in lines:
+        line.entry_id = entry.id
+        db.add(line)
+```
+
+---
+
 ### [ ] Square API — Inventory Sync on Sale
 
 **Goal:** When a sale is recorded in Square POS, deduct sold quantity from matching SaltStocks inventory item.

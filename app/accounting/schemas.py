@@ -69,8 +69,9 @@ class TransactionAnswerSet(BaseModel):
     inventory_link: Optional[InventoryLink] = None
     line_items: list[LineItem] = []
 
-    # ── Inbound freight (BUY_INVENTORY / BUY_INVENTORY_PERSONAL only) ─────
+    # ── Inbound freight & purchase tax (BUY_INVENTORY / BUY_INVENTORY_PERSONAL only) ─────
     freight_in_amount: Optional[Decimal] = None
+    purchase_tax_amount: Optional[Decimal] = None  # sales tax paid to retailer, capitalized into inventory
 
     # ── Sales tax (SELL_INVENTORY_CASH and similar) ───────────────────────
     sales_tax_amount: Optional[Decimal] = None

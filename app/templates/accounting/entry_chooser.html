@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<style>
+  .ch-shell {
+    max-width: 900px;
+    margin: 0 auto;
+    padding-bottom: 48px;
+  }
+  .ch-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+  }
+  .ch-header h1 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--rs-text);
+  }
+
+  /* AI card */
+  .ch-ai-card {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-accent);
+    border-radius: 18px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 8px 20px rgba(24, 50, 45, 0.07);
+  }
+  .ch-ai-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--rs-accent);
+    margin-bottom: 8px;
+  }
+  .ch-ai-prompt {
+    font-size: 0.95rem;
+    color: var(--rs-muted);
+    margin-bottom: 12px;
+  }
+  .ch-ai-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+  .ch-ai-row textarea {
+    flex: 1;
+    border: 1px solid var(--rs-border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    color: var(--rs-text);
+    background: #fcfffd;
+    resize: vertical;
+    min-height: 60px;
+    line-height: 1.4;
+  }
+  .ch-ai-row textarea:focus {
+    outline: none;
+    border-color: var(--rs-accent);
+  }
+  .ch-ai-submit {
+    background: var(--rs-accent);
+    color: #f6fffb;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    align-self: flex-end;
+    transition: background 0.15s;
+  }
+  .ch-ai-submit:hover:not(:disabled) { background: var(--rs-accent-strong); }
+  .ch-ai-submit:disabled { opacity: 0.6; cursor: default; }
+  .ch-ai-settings {
+    font-size: 0.78rem;
+    color: var(--rs-muted);
+    margin-top: 10px;
+  }
+  .ch-ai-settings a { color: var(--rs-accent); }
+
+  /* Notice / error banners */
+  .ch-notice {
+    border-radius: 10px;
+    padding: 11px 14px;
+    font-size: 0.88rem;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .ch-notice.error {
+    background: #fff2f2;
+    border: 1px solid #f0a0a0;
+    color: #b00;
+  }
+  .ch-notice.warn {
+    background: #fffbf0;
+    border: 1px solid #e0c060;
+    color: #7a5a00;
+  }
+  .ch-notice.show { display: block; }
+
+  /* Two-card grid */
+  .ch-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  @media (max-width: 640px) {
+    .ch-cards { grid-template-columns: 1fr; }
+  }
+
+  .ch-card {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .ch-card-head {
+    padding: 14px 18px 10px;
+    border-bottom: 1px solid var(--rs-border);
+  }
+  .ch-card-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--rs-text);
+    margin: 0 0 2px;
+  }
+  .ch-card-sub {
+    font-size: 0.78rem;
+    color: var(--rs-muted);
+    margin: 0;
+  }
+
+  /* Personal card accent */
+  .ch-card.personal .ch-card-head {
+    background: #f4faf7;
+    border-bottom-color: #c8e6d8;
+  }
+  .ch-card.personal .ch-card-title { color: #1a6644; }
+
+  /* Business card accent */
+  .ch-card.business .ch-card-head {
+    background: #f3f6ff;
+    border-bottom-color: #c8d4f0;
+  }
+  .ch-card.business .ch-card-title { color: #1a3066; }
+
+  /* Section headers within cards */
+  .ch-section-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--rs-muted);
+    padding: 10px 18px 4px;
+  }
+
+  /* Template rows */
+  .ch-row {
+    display: block;
+    padding: 10px 18px;
+    font-size: 0.9rem;
+    color: var(--rs-text);
+    text-decoration: none;
+    border-top: 1px solid var(--rs-border);
+    transition: background 0.12s;
+    line-height: 1.35;
+  }
+  .ch-row:first-of-type { border-top: none; }
+  .ch-row:hover {
+    background: var(--rs-surface-alt, #f5faf7);
+  }
+  .ch-card.personal .ch-row:hover { background: #ecf7f1; }
+  .ch-card.business .ch-row:hover { background: #edf1fc; }
+
+  /* Owner section inside personal card */
+  .ch-owner-section { border-top: 2px solid var(--rs-border); }
+
+  /* Other row below */
+  .ch-other-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--rs-muted);
+    margin: 16px 0 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .ch-other-label::before, .ch-other-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rs-border);
+  }
+  .ch-other-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .ch-other-chip {
+    display: inline-block;
+    padding: 7px 14px;
+    border: 1px solid var(--rs-border);
+    border-radius: 20px;
+    font-size: 0.85rem;
+    color: var(--rs-text);
+    text-decoration: none;
+    background: var(--rs-surface);
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .ch-other-chip:hover {
+    border-color: var(--rs-accent);
+    background: var(--rs-surface-alt, #f5faf7);
+  }
+
+  .ch-enable-ai {
+    margin-top: 16px;
+    font-size: 0.8rem;
+    color: var(--rs-muted);
+  }
+  .ch-enable-ai a { color: var(--rs-accent); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ch-shell">
+
+  <div class="ch-header">
+    <h1>New Entry</h1>
+    <a href="/accounting/entries" class="rs-btn rs-btn-ghost">Cancel</a>
+  </div>
+
+  {# Server-side error from no-JS form fallback #}
+  {% if error %}
+  <div class="ch-notice error show">{{ error }}</div>
+  {% endif %}
+
+  {# JS-populated notice (hidden until needed) #}
+  <div id="ch-notice" class="ch-notice"></div>
+
+  {% if ai_enabled %}
+  <div class="ch-ai-card">
+    <div class="ch-ai-label">✦ AI assist</div>
+    <div class="ch-ai-prompt">Describe what happened and we'll figure out the rest.</div>
+    <form id="ch-ai-form" method="post" action="/accounting/entry/ai-start">
+      <div class="ch-ai-row">
+        <textarea id="ch-ai-text" name="user_text"
+                  placeholder="e.g. Bought 10 Funko Pops for $45 each from eBay, paid with my personal Visa"
+                  rows="2"></textarea>
+        <button id="ch-ai-btn" type="submit" class="ch-ai-submit">→ Parse</button>
+      </div>
+    </form>
+    <div class="ch-ai-settings">
+      <a href="/accounting/settings/ai">AI settings</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Two-card grid ──────────────────────────────────────────────────── #}
+  <div class="ch-cards">
+
+    {# ── Personal Funds card ─────────────────────────── #}
+    <div class="ch-card personal">
+      <div class="ch-card-head">
+        <p class="ch-card-title">Personal Funds &amp; Owner</p>
+        <p class="ch-card-sub">Paid out of pocket or moving your own money</p>
+      </div>
+
+      <div class="ch-section-label">Inventory</div>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_INVENTORY_PERSONAL">
+        Bought inventory for resale
+      </a>
+
+      <div class="ch-section-label">Expenses</div>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6010">Business meal</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6020">Hotel for business travel</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6020">Flight / train / rideshare</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6030">Office supplies</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6040">Software subscription</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6050">Shipping label</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6060">eBay / marketplace fees</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6070">Stripe / PayPal / Square fee</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6080">Internet, phone, utilities</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6090">Rent / coworking</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6100">Accountant / lawyer / consultant</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL&expense_account_code=6110">Bank fee</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_EXPENSE_PERSONAL">Other expense (choose category)</a>
+
+      <div class="ch-owner-section">
+        <div class="ch-section-label">Owner</div>
+        <a class="ch-row" href="/accounting/entry/start?template_id=OWNER_CONTRIBUTION">Put personal money into business</a>
+        <a class="ch-row" href="/accounting/entry/start?template_id=OWNER_DRAW">Took money out of business</a>
+        <a class="ch-row" href="/accounting/entry/start?template_id=REIMBURSE_OWNER&prefill_owner_balance=1">Business reimburses me</a>
+      </div>
+    </div>
+
+    {# ── Business Spending card ──────────────────────── #}
+    <div class="ch-card business">
+      <div class="ch-card-head">
+        <p class="ch-card-title">Business Spending</p>
+        <p class="ch-card-sub">Paid with a business card or bank account</p>
+      </div>
+
+      <div class="ch-section-label">Inventory</div>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUY_INVENTORY">
+        Bought inventory for resale
+      </a>
+
+      <div class="ch-section-label">Expenses</div>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BUSINESS_MEAL">Business meal</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=TRAVEL_HOTEL">Hotel for business travel</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=TRAVEL_TRANSPORT">Flight / train / rideshare</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=OFFICE_SUPPLIES">Office supplies</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=SOFTWARE_SUBSCRIPTION">Software subscription</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=SHIPPING_OUTBOUND">Shipping label</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=EBAY_FEES">eBay / marketplace fees</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=PAYMENT_PROCESSING_FEE">Stripe / PayPal / Square fee</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=UTILITIES">Internet, phone, utilities</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=RENT">Rent / coworking</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=PROFESSIONAL_SERVICES">Accountant / lawyer / consultant</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=BANK_FEE">Bank fee</a>
+      <a class="ch-row" href="/accounting/entry/start?template_id=OTHER_EXPENSE">Other expense (choose category)</a>
+
+      <div class="ch-owner-section">
+        <div class="ch-section-label" style="color: transparent; user-select: none;">—</div>
+        <div class="ch-row" style="color: var(--rs-muted); cursor: default; font-size: 0.82rem; font-style: italic;">
+          Owner transactions live in the Personal column →
+        </div>
+      </div>
+    </div>
+
+  </div>{# end .ch-cards #}
+
+  {# ── Other / misc ───────────────────────────────────────────────────── #}
+  <div class="ch-other-label">Other</div>
+  <div class="ch-other-list">
+    <a class="ch-other-chip" href="/accounting/entry/start?template_id=SELL_INVENTORY_CASH">Sold inventory (cash/card)</a>
+    <a class="ch-other-chip" href="/accounting/entry/start?template_id=PAY_CREDIT_CARD">Paid down credit card</a>
+    <a class="ch-other-chip" href="/accounting/entry/start?template_id=SALES_TAX_REMITTED">Paid sales tax to state</a>
+    <a class="ch-other-chip" href="/accounting/entry/start?template_id=OTHER_INCOME">Non-sales income (refund, rebate…)</a>
+  </div>
+
+  {% if not ai_enabled %}
+  <div class="ch-enable-ai">
+    <a href="/accounting/settings/ai">Enable AI assist</a>
+    to describe transactions in plain English instead.
+  </div>
+  {% endif %}
+
+</div>
+
+{% if ai_enabled %}
+<script>
+(function () {
+  const form   = document.getElementById('ch-ai-form');
+  const text   = document.getElementById('ch-ai-text');
+  const btn    = document.getElementById('ch-ai-btn');
+  const notice = document.getElementById('ch-notice');
+
+  function showNotice(msg, kind) {
+    notice.innerHTML = msg;
+    notice.className = 'ch-notice ' + kind + ' show';
+  }
+  function clearNotice() {
+    notice.className = 'ch-notice';
+    notice.innerHTML = '';
+  }
+
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const desc = text.value.trim();
+    if (!desc) return;
+
+    clearNotice();
+    btn.disabled = true;
+    btn.textContent = '…';
+
+    try {
+      const resp = await fetch('/accounting/entry/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: desc }),
+      });
+
+      const data = await resp.json();
+
+      if (!resp.ok || data.error) {
+        const msg = data.error || 'Unknown error.';
+        if (data.fallback) {
+          showNotice(
+            'AI unavailable: ' + msg + ' — pick a template below to continue manually.',
+            'warn',
+          );
+        } else {
+          showNotice(msg, 'error');
+        }
+        btn.disabled = false;
+        btn.textContent = '→ Parse';
+        return;
+      }
+
+      window.location.href = data.redirect_url;
+
+    } catch (_) {
+      showNotice(
+        'Could not reach the AI service — pick a template below to continue manually.',
+        'warn',
+      );
+      btn.disabled = false;
+      btn.textContent = '→ Parse';
+    }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

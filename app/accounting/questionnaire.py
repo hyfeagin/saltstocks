@@ -133,13 +133,17 @@ GLOBAL_FLOW: list[Step] = [
     ),
 
     # ── 5. Total amount ──────────────────────────────────────────────────────
+    # Skipped for BUY_INVENTORY / BUY_INVENTORY_PERSONAL — computed from line items.
     Step(
         id="total_amount",
         question="What was the total amount?",
         input_type="number",
         maps_to="total_amount",
         help_text="Enter the grand total including any sales tax you collected or paid.",
-        shown_when=lambda a: _a(a, "template_id") != "REIMBURSE_OWNER",
+        shown_when=lambda a: (
+            _a(a, "template_id") != "REIMBURSE_OWNER"
+            and _a(a, "template_id") not in _TEMPLATES_WITH_INVENTORY_LINK
+        ),
     ),
 
     # ── 6. Reimbursement source account (REIMBURSE_OWNER only) ──────────────
@@ -200,25 +204,39 @@ GLOBAL_FLOW: list[Step] = [
         ),
     ),
 
-    # ── 11. Inventory link ───────────────────────────────────────────────────
+    # ── 11. Inventory line items (purchase templates) ─────────────────────────
+    # Multi-SKU: user adds rows with item + qty + unit cost each.
+    # Answer is serialized as JSON array → maps to line_items on TransactionAnswerSet.
     Step(
         id="inventory_link",
-        question="Which inventory item does this purchase add to?",
+        question="What inventory did you purchase?",
         input_type="inventory_picker",
-        maps_to="inventory_link",
-        help_text="Link to an existing SKU or create a new one. Use '+ Add another item' for multi-SKU shipments.",
+        maps_to="line_items",
+        help_text="Add each SKU you bought. Use '+ Add another item' for multi-SKU shipments.",
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK,
     ),
 
     # ── 12. Freight-in ───────────────────────────────────────────────────────
     Step(
         id="freight_in_amount",
-        question="Did the wholesaler charge you for shipping or handling?",
+        question="Did the retailer charge you for shipping or handling?",
         input_type="number",
         maps_to="freight_in_amount",
         optional=True,
         default=Decimal("0"),
         help_text="If yes, enter the total. We'll add it to your inventory cost and split it across items automatically.",
+        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_FREIGHT_IN,
+    ),
+
+    # ── 12b. Purchase tax ────────────────────────────────────────────────────
+    Step(
+        id="purchase_tax_amount",
+        question="Did you pay sales tax to the retailer?",
+        input_type="number",
+        maps_to="purchase_tax_amount",
+        optional=True,
+        default=Decimal("0"),
+        help_text="Enter the total sales tax charged at purchase. We'll capitalize it into your inventory cost.",
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_FREIGHT_IN,
     ),
 
@@ -384,9 +402,46 @@ def build_answer_set(session: QuestionnaireSession) -> dict:
     if d.get("entry_date") == "today" or not d.get("entry_date"):
         d["entry_date"] = date.today()
 
-    # receipt_files must always be a list (never None)
-    if not isinstance(d.get("receipt_files"), list):
+    # receipt_files must always be a list[str] of stored_path values.
+    # entry_answer stores full metadata dicts; extract just stored_path here.
+    raw_files = d.get("receipt_files")
+    if not isinstance(raw_files, list):
         d["receipt_files"] = []
+    else:
+        d["receipt_files"] = [
+            f["stored_path"] if isinstance(f, dict) else f
+            for f in raw_files
+        ]
+
+    # Convert raw line_items list (from picker JSON) to LineItem-compatible dicts,
+    # and compute total_amount from item subtotals + freight.
+    raw_items = d.get("line_items")
+    if raw_items and isinstance(raw_items, list):
+        converted: list[dict] = []
+        subtotal = Decimal("0")
+        for item in raw_items:
+            qty = int(item.get("quantity", 1))
+            cost = Decimal(str(item.get("unit_cost", "0"))).quantize(Decimal("0.0001"))
+            subtotal += cost * qty
+            converted.append({
+                "inventory_link": {
+                    "mode": item["mode"],
+                    "item_id": item.get("item_id"),
+                    "sku": item.get("sku"),
+                    "name": item.get("name"),
+                    "quantity": qty,
+                },
+                "unit_cost": cost,
+                "quantity": qty,
+            })
+        d["line_items"] = converted
+        freight = d.get("freight_in_amount") or Decimal("0")
+        if not isinstance(freight, Decimal):
+            freight = Decimal(str(freight)).quantize(Decimal("0.01"))
+        ptax = d.get("purchase_tax_amount") or Decimal("0")
+        if not isinstance(ptax, Decimal):
+            ptax = Decimal(str(ptax)).quantize(Decimal("0.01"))
+        d["total_amount"] = (subtotal + freight + ptax).quantize(Decimal("0.01"))
 
     if template_id in _TEMPLATES_WITH_SALES_TAX and d.get("sales_tax_applies") != "yes":
         d["sales_tax_amount"] = Decimal("0")
