@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 680px; margin: 0 auto;">
+
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+    <h1 style="margin: 0;">{{ "Add Material" if mode == "new" else "Edit Material" }}</h1>
+    <a class="btn btn-ghost" href="/materials">Back</a>
+  </div>
+
+  {% if mode == "edit" and item %}
+  <div class="card" style="margin-bottom: 14px; padding: 10px 16px; background: var(--ss-surface-alt); display: flex; align-items: center; gap: 12px;">
+    <span style="font-size: 0.82rem; font-weight: 600; color: var(--ss-muted);">SKU</span>
+    <code style="font-size: 0.95rem;">{{ item["sku"] }}</code>
+    <span class="muted" style="font-size: 0.82rem;">Read-only after creation.</span>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <form method="post"
+          action="{{ '/materials/new' if mode == 'new' else '/materials/' ~ item['id'] ~ '/edit' }}">
+
+      <div class="row">
+        <div>
+          <label>Material Code</label>
+          {% set bc = (item["brand_code"] if item and item["brand_code"] else "") %}
+          <select name="brand_code" required>
+            <option value="" disabled {{ 'selected' if not bc else '' }}>(select code)</option>
+            {% for x in codes %}
+            <option value="{{ x['code'] }}" {{ 'selected' if bc == x['code'] else '' }}>
+              {{ x['label'] }} ({{ x['code'] }})
+            </option>
+            {% endfor %}
+          </select>
+          <small class="muted">Sets the middle of the SKU. <a href="/config">Manage codes →</a></small>
+        </div>
+        <div>
+          <label>Name</label>
+          <input name="name" value="{{ item['name'] if item else '' }}"
+                 required placeholder="e.g. Epsom Salt" />
+        </div>
+      </div>
+
+      <div class="row" style="margin-top: 14px;">
+        <div>
+          <label>Quantity on Hand</label>
+          <input type="number" name="qty_on_hand" step="any"
+                 value="{{ item['qty_on_hand'] if item else 0 }}" />
+        </div>
+        <div>
+          <label>Unit</label>
+          <select name="unit">
+            {% for u in units %}
+            <option value="{{ u }}"
+              {{ 'selected' if item and item['unit'] == u
+                 else ('selected' if u == 'oz' and not item else '') }}>{{ u }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top: 14px;">
+        <div>
+          <label>Unit Cost ($)</label>
+          <input type="number" name="unit_cost" step="0.0001"
+                 value="{{ item['unit_cost'] if item else 0 }}"
+                 placeholder="Cost per oz / lb / each..." />
+        </div>
+        <div>
+          <label>Location (optional)</label>
+          <input name="location"
+                 value="{{ item['location'] if item and item['location'] else '' }}"
+                 placeholder="Shelf 2, Bin A3..." />
+        </div>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <label>Notes (optional)</label>
+        <textarea name="notes" rows="2">{{ item['notes'] if item and item['notes'] else '' }}</textarea>
+      </div>
+
+      <input type="hidden" name="company"
+             value="{{ item['company'] if item and item['company'] else 'UM' }}" />
+
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-primary" type="submit">Save</button>
+        <a class="btn btn-ghost" href="/materials">Cancel</a>
+      </div>
+
+      {% if mode == "new" %}
+      <p class="muted" style="margin: 14px 0 0; font-size: 0.82rem;">
+        SKU will be auto-generated on save (format: UM-CODE-###).
+      </p>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endblock %}

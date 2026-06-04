@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 1100px; margin: 0 auto;">
+
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+    <div>
+      <h1 style="margin: 0;">Materials</h1>
+      <p class="muted" style="margin: 6px 0 0;">Track raw material stock. Record production runs to convert materials into finished resale items.</p>
+    </div>
+    <div style="display: flex; gap: 10px; flex-shrink: 0;">
+      <a class="btn btn-ghost" href="/materials/produce">Record Production Run</a>
+      <a class="btn btn-primary" href="/materials/new">Add Material</a>
+    </div>
+  </div>
+
+  {% if rows %}
+  <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 24px;">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>SKU</th>
+          <th>Qty on Hand</th>
+          <th>Unit Cost</th>
+          <th>Location</th>
+          <th style="width: 50px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr {% if r["qty_on_hand"] <= 0 %}style="opacity: 0.55;"{% endif %}>
+          <td>
+            <strong>{{ r["name"] }}</strong>
+            {% if r["notes"] %}<br><small class="muted">{{ r["notes"] }}</small>{% endif %}
+          </td>
+          <td class="muted" style="font-size: 0.88rem;">{{ r["sku"] or "-" }}</td>
+          <td>
+            <span style="font-weight: 500; {% if r['qty_on_hand'] < 0 %}color: var(--ss-danger);{% endif %}">
+              {{ "%.2f"|format(r["qty_on_hand"]) }} {{ r["unit"] }}
+            </span>
+            <form method="post" action="/materials/{{ r['id'] }}/adjust"
+                  style="display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle;">
+              <input type="number" name="delta" value="1" step="any"
+                     style="width: 66px; padding: 3px 6px; font-size: 0.85rem;" />
+              <button class="btn" type="submit"
+                      style="padding: 3px 10px; font-size: 0.85rem; min-height: unset;">+/-</button>
+            </form>
+          </td>
+          <td style="font-size: 0.9rem;">
+            ${{ "%.4f"|format(r["unit_cost"]) }} / {{ r["unit"] }}
+          </td>
+          <td class="muted" style="font-size: 0.88rem;">{{ r["location"] or "-" }}</td>
+          <td>
+            <a href="/materials/{{ r['id'] }}/edit"
+               style="color: var(--ss-accent-strong); text-decoration: none; font-size: 0.85rem;">edit</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card" style="text-align: center; padding: 48px 20px; margin-bottom: 24px;">
+    <p class="muted" style="margin-bottom: 16px;">No materials tracked yet.</p>
+    <a class="btn btn-primary" href="/materials/new">Add your first material</a>
+  </div>
+  {% endif %}
+
+  {% if recent_runs %}
+  <h2 style="margin: 0 0 12px; font-size: 1.2rem;">Production History</h2>
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Finished Item</th>
+          <th>Qty Produced</th>
+          <th>Cost / Unit</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in recent_runs %}
+        <tr>
+          <td class="muted" style="white-space: nowrap; font-size: 0.88rem;">{{ run["produced_at"][:16] }}</td>
+          <td>
+            <strong>{{ run["finished_name"] }}</strong>
+            {% if run["finished_sku"] %}
+              <small class="muted"> ({{ run["finished_sku"] }})</small>
+            {% endif %}
+          </td>
+          <td>{{ "%.2f"|format(run["qty_produced"]) }}</td>
+          <td>
+            {% if run["cost_per_unit"] %}
+              ${{ "%.4f"|format(run["cost_per_unit"]) }}
+            {% else %}
+              <span class="muted">-</span>
+            {% endif %}
+          </td>
+          <td class="muted" style="font-size: 0.88rem;">{{ run["notes"] or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

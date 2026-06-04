@@ -441,6 +441,47 @@ def migrate():
               AND brand IS NOT NULL AND TRIM(brand) != ''
         """)
 
+        # Seed additional material codes (idempotent via INSERT OR IGNORE)
+        conn.executemany(
+            "INSERT OR IGNORE INTO codes(code, label, kind) VALUES (?,?,?)",
+            [
+                ("BAKSOD", "Baking Soda",    "material"),
+                ("SLSA",   "SLSA Powder",    "material"),
+                ("BSALT",  "Bath Salt Base", "material"),
+                ("COLORANT","Colorant/Dye",  "material"),
+                ("PKG",    "Packaging",      "material"),
+            ],
+        )
+
+        # Production runs: a record of converting materials into a finished resale item
+        if not table_exists(conn, "production_runs"):
+            conn.execute("""
+            CREATE TABLE production_runs (
+              id                INTEGER PRIMARY KEY AUTOINCREMENT,
+              finished_item_id  INTEGER NOT NULL,
+              qty_produced      REAL    NOT NULL,
+              cost_per_unit     REAL,
+              notes             TEXT,
+              produced_at       TEXT NOT NULL DEFAULT (datetime('now')),
+              FOREIGN KEY(finished_item_id) REFERENCES items(id)
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_prod_runs_item ON production_runs(finished_item_id)"
+            )
+
+        if not table_exists(conn, "production_run_materials"):
+            conn.execute("""
+            CREATE TABLE production_run_materials (
+              id               INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id           INTEGER NOT NULL,
+              material_item_id INTEGER NOT NULL,
+              qty_used         REAL    NOT NULL,
+              FOREIGN KEY(run_id)           REFERENCES production_runs(id) ON DELETE CASCADE,
+              FOREIGN KEY(material_item_id) REFERENCES items(id)
+            )
+            """)
+
     conn.close()
     print("Migration complete.")
 

@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="max-width: 820px; margin: 0 auto;">
+
+  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px;">
+    <div>
+      <h1 style="margin: 0;">Record Production Run</h1>
+      <p class="muted" style="margin: 6px 0 0;">Log what you made and which materials were used. Material stock is deducted automatically.</p>
+    </div>
+    <a class="btn btn-ghost" href="/materials">Back</a>
+  </div>
+
+  <form method="post" action="/materials/produce" id="produce-form">
+
+    <!-- ── Finished Item ── -->
+    <div class="card" style="margin-bottom: 16px;">
+      <h3 style="margin: 0 0 16px;">Finished Item</h3>
+      <div class="row">
+        <div>
+          <label>Resale item</label>
+          <select name="finished_item_id" id="finished-item-sel">
+            <option value="">-- Create new item --</option>
+            {% for item in resale_items %}
+            <option value="{{ item['id'] }}">
+              {{ item['name'] }}{% if item['sku'] %} · {{ item['sku'] }}{% endif %}
+              ({{ "%.0f"|format(item['qty_on_hand']) }} on hand)
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div id="new-name-wrap">
+          <label>New item name</label>
+          <input type="text" name="new_item_name" id="new-item-name"
+                 placeholder="e.g. Lavender Bath Salts 16oz" />
+          <small class="muted">Creates a new resale item. You can edit full details afterward.</small>
+        </div>
+      </div>
+      <div class="row" style="margin-top: 14px;">
+        <div>
+          <label>Quantity produced <span style="color: var(--ss-danger);">*</span></label>
+          <input type="number" name="qty_produced" id="qty-produced"
+                 step="any" min="0.001" required placeholder="e.g. 200" />
+        </div>
+        <div>
+          <label>Notes (optional)</label>
+          <input type="text" name="notes" placeholder="Batch #1, Lavender scent..." />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Materials Used ── -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px;">
+        <div>
+          <h3 style="margin: 0;">Materials Used
+            <span class="muted" style="font-size: 0.85rem; font-weight: normal;">(optional)</span>
+          </h3>
+          <small class="muted">Stock will be decremented from each material you add here.</small>
+        </div>
+        {% if not materials %}
+        <a class="btn btn-ghost" href="/materials/new" style="font-size: 0.85rem; flex-shrink: 0;">Add materials →</a>
+        {% endif %}
+      </div>
+
+      {% if not materials %}
+      <p class="muted">
+        No materials in your inventory yet.
+        <a href="/materials/new">Add materials</a> to track consumption,
+        or submit this form without material tracking.
+      </p>
+      {% else %}
+      <div id="mat-lines"></div>
+      <button type="button" class="btn btn-ghost" id="add-mat-btn"
+              style="margin-top: 8px; font-size: 0.9rem;">+ Add material</button>
+
+      <div id="cost-summary"
+           style="display: none; margin-top: 16px; padding: 12px 16px;
+                  background: var(--ss-surface-alt); border-radius: var(--ss-r-card);">
+        Total material cost: <strong id="total-cost">$0.00</strong>
+        &nbsp;·&nbsp;
+        Cost per unit: <strong id="cost-per-unit">$0.00</strong>
+        <span class="muted" style="font-size: 0.82rem;"> (will be set on the finished item)</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+      <button class="btn btn-primary" type="submit">Record Production Run</button>
+      <a class="btn btn-ghost" href="/materials">Cancel</a>
+    </div>
+  </form>
+</div>
+
+{% if materials %}
+<script>
+(() => {
+  // Build option HTML with cost/unit data attributes from server-rendered material list
+  const matOptions = [
+    '<option value="">-- select material --</option>',
+    {% for m in materials %}
+    `<option value="{{ m['id'] }}"
+             data-cost="{{ m['unit_cost'] }}"
+             data-unit="{{ m['unit'] }}"
+             data-qty="{{ m['qty_on_hand'] }}">
+       {{ m['name'] }} &mdash; {{ "%.2f"|format(m['qty_on_hand']) }} {{ m['unit'] }} on hand
+     </option>`,
+    {% endfor %}
+  ].join('');
+
+  const linesContainer  = document.getElementById('mat-lines');
+  const addBtn          = document.getElementById('add-mat-btn');
+  const costSummary     = document.getElementById('cost-summary');
+  const totalCostEl     = document.getElementById('total-cost');
+  const costPerUnitEl   = document.getElementById('cost-per-unit');
+  const qtyProducedEl   = document.getElementById('qty-produced');
+  const finishedSel     = document.getElementById('finished-item-sel');
+  const newNameWrap     = document.getElementById('new-name-wrap');
+  const newNameInput    = document.getElementById('new-item-name');
+
+  function makeLine() {
+    const div = document.createElement('div');
+    div.className = 'mat-line';
+    div.style.cssText = 'display: grid; grid-template-columns: 1fr 120px auto; gap: 8px; align-items: center; margin-bottom: 8px;';
+    div.innerHTML = `
+      <select name="material_id">${matOptions}</select>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <input type="number" name="qty_used" step="any" min="0" placeholder="qty"
+               style="width: 70px; flex: 1;" />
+        <span class="mat-unit muted" style="font-size: 0.85rem; white-space: nowrap; min-width: 24px;"></span>
+      </div>
+      <button type="button" class="btn"
+              style="padding: 4px 10px; color: var(--ss-danger); border-color: var(--ss-danger);">×</button>
+    `;
+
+    const sel       = div.querySelector('select');
+    const qtyInput  = div.querySelector('input[name="qty_used"]');
+    const unitSpan  = div.querySelector('.mat-unit');
+    const removeBtn = div.querySelector('button');
+
+    sel.addEventListener('change', () => {
+      const opt = sel.selectedOptions[0];
+      unitSpan.textContent = opt?.dataset.unit || '';
+      recalcCost();
+    });
+    qtyInput.addEventListener('input', recalcCost);
+    removeBtn.addEventListener('click', () => { div.remove(); recalcCost(); });
+
+    return div;
+  }
+
+  function recalcCost() {
+    let total = 0;
+    let hasData = false;
+    document.querySelectorAll('.mat-line').forEach(line => {
+      const sel  = line.querySelector('select');
+      const qty  = parseFloat(line.querySelector('input[name="qty_used"]').value || 0);
+      const cost = parseFloat(sel.selectedOptions[0]?.dataset.cost || 0);
+      if (qty > 0 && cost > 0) { total += qty * cost; hasData = true; }
+    });
+
+    const qtyProduced = parseFloat(qtyProducedEl.value || 0);
+    if (hasData) {
+      totalCostEl.textContent   = '$' + total.toFixed(2);
+      costPerUnitEl.textContent = qtyProduced > 0
+        ? '$' + (total / qtyProduced).toFixed(4)
+        : '—';
+      costSummary.style.display = '';
+    } else {
+      costSummary.style.display = 'none';
+    }
+  }
+
+  function syncNewNameField() {
+    const creating = !finishedSel.value;
+    newNameWrap.style.display  = creating ? '' : 'none';
+    newNameInput.required      = creating;
+  }
+
+  addBtn.addEventListener('click', () => linesContainer.appendChild(makeLine()));
+  finishedSel.addEventListener('change', syncNewNameField);
+  qtyProducedEl.addEventListener('input', recalcCost);
+
+  syncNewNameField();
+})();
+</script>
+{% endif %}
+
+{% endblock %}
