@@ -37,6 +37,10 @@ class NLPResult:
     payment_account_id: Optional[int] = None
     payment_account_hint: Optional[str] = None  # free-text hint when ID isn't certain
     funding_source: Optional[str] = None         # "business" | "personal"
+    # Split purchase fields (BUY_INVENTORY / BUY_INVENTORY_PERSONAL only)
+    is_split_purchase: bool = False
+    inventory_amount: Optional[str] = None   # decimal string — inventory portion of total
+    expense_splits: Optional[list[dict]] = None  # [{account_code, amount, memo?}]
     confidence: dict[str, float] = field(default_factory=dict)
     error: Optional[str] = None
 
@@ -78,23 +82,40 @@ BUSINESS FUNDS (business card, business checking, business account):
 OWNER DRAW: owner taking money out of the business for personal use → OWNER_DRAW
 REIMBURSEMENT: business paying the owner back for personal spending → REIMBURSE_OWNER
 
+MIXED PURCHASE (inventory + expense on same receipt):
+  If the description mentions BOTH resale inventory AND non-inventory items
+  (e.g. bubble wrap, packing tape, office supplies, software, tools) in one transaction:
+  - Set template_id to BUY_INVENTORY or BUY_INVENTORY_PERSONAL (based on funding source)
+  - Set is_split_purchase: true
+  - Set inventory_amount: the inventory-only portion as a decimal string
+  - Set expense_splits: array of objects, one per non-inventory line:
+      [{{"account_code": "<code from chart>", "amount": "<decimal string>", "memo": "<description>"}}]
+    Match each expense to the closest account code in the chart of accounts above.
+  - inventory_amount + sum(expense_splits[].amount) MUST equal total_amount exactly
+  - Set confidence["expense_splits"] to reflect certainty in the split amounts
+  If amounts are ambiguous or only one type is mentioned, set is_split_purchase: false instead.
+
 ## Chart of accounts (business payment accounts only)
 {account_lines}
 
 ## Response format
 Return ONLY a JSON object — no markdown fences, no commentary. Fields:
-- template_id   string   one of the template IDs above (required)
-- total_amount  string   decimal like "49.99" (required)
-- entry_date    string   ISO date "YYYY-MM-DD" (default: today if not mentioned)
-- vendor        string|null   merchant or seller name, or null
-- memo          string|null   brief transaction note, or null
-- payment_account_id   integer|null   business account id — null for *_PERSONAL templates
-- payment_account_hint string|null   payment method described but not clearly matched
-- funding_source       string|null   "business" or "personal"
-- confidence    object   float 0.0–1.0 per field populated
+- template_id        string   one of the template IDs above (required)
+- total_amount       string   decimal like "49.99" (required)
+- entry_date         string   ISO date "YYYY-MM-DD" (default: today if not mentioned)
+- vendor             string|null   merchant or seller name, or null
+- memo               string|null   brief transaction note, or null
+- payment_account_id integer|null  business account id — null for *_PERSONAL templates
+- payment_account_hint string|null payment method described but not clearly matched
+- funding_source     string|null   "business" or "personal"
+- is_split_purchase  boolean  true only when BOTH inventory AND non-inventory items present
+- inventory_amount   string|null   inventory portion as decimal string (only when is_split_purchase)
+- expense_splits     array|null    non-inventory lines (only when is_split_purchase); see format above
+- confidence         object   float 0.0–1.0 per field populated
 
 Confidence guide: 0.9+ = certain, 0.7–0.9 = confident, below 0.7 = guessing.
-Set payment_account_id only when ≥ 0.8 confident AND the template is not a *_PERSONAL template."""
+Set payment_account_id only when ≥ 0.8 confident AND the template is not a *_PERSONAL template.
+Set is_split_purchase: true only when you are ≥ 0.7 confident the amounts break down correctly."""
 
 
 def parse_transaction(
@@ -161,6 +182,43 @@ def parse_transaction(
     amount_raw = parsed.get("total_amount")
     total_amount = str(amount_raw) if amount_raw is not None else None
 
+    # Split purchase fields
+    is_split_purchase = bool(parsed.get("is_split_purchase", False))
+    inventory_amount_raw = parsed.get("inventory_amount")
+    inventory_amount = str(inventory_amount_raw) if inventory_amount_raw is not None else None
+
+    expense_splits: Optional[list[dict]] = None
+    if is_split_purchase:
+        raw_splits = parsed.get("expense_splits")
+        if isinstance(raw_splits, list):
+            valid_splits = []
+            for s in raw_splits:
+                if not isinstance(s, dict):
+                    continue
+                code = s.get("account_code")
+                amt = s.get("amount")
+                if not code or amt is None:
+                    continue
+                valid_splits.append({
+                    "account_code": str(code),
+                    "amount": str(amt),
+                    "memo": s.get("memo") or None,
+                })
+            expense_splits = valid_splits if valid_splits else None
+
+        # Sanity check: if splits don't sum to total, clear is_split_purchase
+        if expense_splits and total_amount and inventory_amount:
+            try:
+                from decimal import Decimal as _D
+                computed = _D(inventory_amount) + sum(_D(s["amount"]) for s in expense_splits)
+                if abs(computed - _D(total_amount)) > _D("0.02"):
+                    is_split_purchase = False
+                    inventory_amount = None
+                    expense_splits = None
+            except Exception:
+                is_split_purchase = False
+                expense_splits = None
+
     return NLPResult(
         template_id=parsed.get("template_id") or None,
         total_amount=total_amount,
@@ -170,5 +228,8 @@ def parse_transaction(
         payment_account_id=payment_account_id,
         payment_account_hint=parsed.get("payment_account_hint") or None,
         funding_source=parsed.get("funding_source") or None,
+        is_split_purchase=is_split_purchase,
+        inventory_amount=inventory_amount,
+        expense_splits=expense_splits,
         confidence={k: float(v) for k, v in confidence.items() if isinstance(v, (int, float))},
     )

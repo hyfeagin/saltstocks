@@ -66,6 +66,13 @@ _TEMPLATES: list[Template] = [
         required_fields=("total_amount", "payment_account_id"),
     ),
     Template(
+        id="SELL_INVENTORY_EBAY",
+        name="Sold on eBay (fees & shipping included)",
+        debit_account_code=None,   debit_from_field="payment_account_id",
+        credit_account_code="4000", credit_from_field=None,
+        required_fields=("total_amount", "payment_account_id"),
+    ),
+    Template(
         id="COGS_RECOGNITION",
         name="Cost of goods sold (auto when sale recorded)",
         debit_account_code="5000", debit_from_field=None,
@@ -224,6 +231,8 @@ def resolve_lines(
     payment_account_id: Optional[int] = None,
     expense_category_account_id: Optional[int] = None,
     sales_tax_amount: Optional[Decimal] = None,
+    ebay_fees_amount: Optional[Decimal] = None,
+    ebay_shipping_charged: Optional[Decimal] = None,
     memo: Optional[str] = None,
     inventory_item_id: Optional[int] = None,
 ) -> list[JournalLineInput]:
@@ -299,6 +308,38 @@ def resolve_lines(
                     memo="Sales tax",
                 )
             )
+        return lines
+
+    # ── SELL_INVENTORY_EBAY: net deposit + fees debit against gross revenue ─
+    if template_id == "SELL_INVENTORY_EBAY":
+        fees = ebay_fees_amount or Decimal("0")
+        shipping = ebay_shipping_charged or Decimal("0")
+        gross_revenue = (total_amount + shipping).quantize(Decimal("0.01"))
+        net_deposit = (gross_revenue - fees).quantize(Decimal("0.01"))
+        lines: list[JournalLineInput] = [
+            JournalLineInput(
+                account_id=_debit_account_id(),
+                debit=net_deposit,
+                memo=memo,
+                inventory_item_id=inventory_item_id,
+            ),
+        ]
+        if fees > Decimal("0"):
+            lines.append(
+                JournalLineInput(
+                    account_id=_fixed("6060"),
+                    debit=fees,
+                    memo="eBay fees",
+                )
+            )
+        lines.append(
+            JournalLineInput(
+                account_id=_fixed("4000"),
+                credit=gross_revenue,
+                memo=memo,
+                inventory_item_id=inventory_item_id,
+            )
+        )
         return lines
 
     # ── Standard two-line entry ───────────────────────────────────────────

@@ -1,0 +1,279 @@
+{% extends "base.html" %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/resale.css" />
+<style>
+  .ld-shell {
+    max-width: 860px;
+    margin: 0 auto;
+    padding-bottom: 48px;
+  }
+  .ld-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .ld-header h1 { margin: 0; font-size: 1.5rem; color: var(--rs-text); }
+  .ld-eyebrow {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--rs-accent);
+    margin-bottom: 4px;
+  }
+
+  /* ── Stats bar ── */
+  .ld-stats {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .ld-stat {
+    flex: 1 1 140px;
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-border);
+    border-radius: 14px;
+    padding: 14px 18px;
+    box-shadow: 0 4px 12px rgba(24,50,45,0.06);
+  }
+  .ld-stat-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--rs-muted);
+    margin-bottom: 4px;
+  }
+  .ld-stat-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--rs-text);
+  }
+  .ld-stat-sub {
+    font-size: 0.78rem;
+    color: var(--rs-muted);
+    margin-top: 2px;
+  }
+  .ld-stat.accent { border-left: 3px solid var(--rs-accent); }
+
+  /* ── Items table ── */
+  .ld-card {
+    background: var(--rs-surface);
+    border: 1px solid var(--rs-border);
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(24,50,45,0.06);
+    overflow: hidden;
+  }
+  .ld-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--rs-border);
+  }
+  .ld-card-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--rs-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .ld-filter {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .ld-filter-btn {
+    padding: 4px 12px;
+    border-radius: 999px;
+    border: 1px solid var(--rs-border);
+    background: var(--rs-surface);
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--rs-muted);
+    cursor: pointer;
+  }
+  .ld-filter-btn.active {
+    background: rgba(47,143,115,0.12);
+    border-color: var(--rs-accent);
+    color: var(--rs-accent-strong);
+  }
+  .ld-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .ld-table th {
+    padding: 8px 14px;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--rs-muted);
+    border-bottom: 1px solid var(--rs-border);
+    background: var(--rs-surface-alt);
+  }
+  .ld-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--rs-surface-alt);
+    vertical-align: middle;
+  }
+  .ld-table tr:last-child td { border-bottom: none; }
+  .ld-table tr:hover td { background: rgba(47,143,115,0.03); }
+  .ld-sku {
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    font-size: 0.76rem;
+    background: var(--rs-surface-deep);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--rs-accent-strong);
+    white-space: nowrap;
+  }
+  .ld-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 600;
+  }
+  .ld-status.sold     { background: rgba(47,143,115,0.12); color: var(--rs-accent-strong); }
+  .ld-status.listed   { background: rgba(59,130,246,0.10); color: #1d4ed8; }
+  .ld-status.unlisted { background: var(--rs-surface-deep); color: var(--rs-muted); }
+  .ld-empty { padding: 24px 20px; text-align: center; color: var(--rs-muted); font-size: 0.9rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="ld-shell">
+
+  <div class="ld-header">
+    <div>
+      <div class="ld-eyebrow">Inventory Lot</div>
+      <h1>{{ lot['description'] }}</h1>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      {% if lot['journal_entry_id'] %}
+      <a href="/accounting/entries/{{ lot['journal_entry_id'] }}" class="rs-btn rs-btn-ghost" style="font-size:0.85rem;">View Purchase Entry →</a>
+      {% endif %}
+      <a href="/accounting/entries" class="rs-btn rs-btn-ghost">← All Entries</a>
+    </div>
+  </div>
+
+  {# ── Stats ── #}
+  <div class="ld-stats">
+    <div class="ld-stat accent">
+      <div class="ld-stat-label">Unit Cost</div>
+      <div class="ld-stat-value">${{ "%.4f"|format(lot['unit_cost']|float) }}</div>
+      <div class="ld-stat-sub">per item (COGS rate)</div>
+    </div>
+    <div class="ld-stat">
+      <div class="ld-stat-label">Received</div>
+      <div class="ld-stat-value">{{ lot['qty_received'] }}</div>
+      <div class="ld-stat-sub">{{ lot['received_date'] }}</div>
+    </div>
+    <div class="ld-stat">
+      <div class="ld-stat-label">Sold</div>
+      <div class="ld-stat-value">{{ qty_sold }}</div>
+      <div class="ld-stat-sub">COGS realized: ${{ realized_cogs }}</div>
+    </div>
+    <div class="ld-stat">
+      <div class="ld-stat-label">Remaining</div>
+      <div class="ld-stat-value">{{ lot['qty_remaining'] }}</div>
+      <div class="ld-stat-sub">Inventory value: ${{ unrealized_value }}</div>
+    </div>
+    <div class="ld-stat">
+      <div class="ld-stat-label">Total Lot Cost</div>
+      <div class="ld-stat-value">${{ total_value }}</div>
+      <div class="ld-stat-sub">
+        {% if lot['vendor'] %}from {{ lot['vendor'] }}{% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── Progress bar ── #}
+  {% if lot['qty_received'] > 0 %}
+  {% set sold_pct = (qty_sold / lot['qty_received'] * 100) | int %}
+  <div style="margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;font-size:0.78rem;color:var(--rs-muted);margin-bottom:4px;">
+      <span>{{ sold_pct }}% sold</span>
+      <span>{{ lot['qty_remaining'] }} remaining</span>
+    </div>
+    <div style="height:6px;background:var(--rs-surface-deep);border-radius:999px;overflow:hidden;">
+      <div style="height:100%;width:{{ sold_pct }}%;background:var(--rs-accent);border-radius:999px;transition:width 0.3s;"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Items table ── #}
+  <div class="ld-card">
+    <div class="ld-card-head">
+      <span class="ld-card-title">{{ items | length }} Items</span>
+      <div class="ld-filter">
+        <button type="button" class="ld-filter-btn active" onclick="filterLot('all', this)">All</button>
+        <button type="button" class="ld-filter-btn" onclick="filterLot('unsold', this)">Unsold</button>
+        <button type="button" class="ld-filter-btn" onclick="filterLot('sold', this)">Sold</button>
+        <button type="button" class="ld-filter-btn" onclick="filterLot('listed', this)">Listed</button>
+      </div>
+    </div>
+
+    {% if items %}
+    <table class="ld-table" id="lot-items-table">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Name</th>
+          <th>Condition</th>
+          <th style="text-align:right">COGS</th>
+          <th>Status</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr data-status="{{ item['status'] }}" data-qty="{{ item['qty_on_hand'] }}">
+          <td>{% if item['sku'] %}<span class="ld-sku">{{ item['sku'] }}</span>{% else %}&mdash;{% endif %}</td>
+          <td>{{ item['name'] }}</td>
+          <td>{{ item['condition'] or '—' }}</td>
+          <td style="text-align:right">${{ "%.4f"|format(item['unit_cost']|float) }}</td>
+          <td>
+            {% set s = item['status'] %}
+            {% if item['qty_on_hand'] == 0 %}
+              <span class="ld-status sold">Sold</span>
+            {% elif s == 'listed' %}
+              <span class="ld-status listed">Listed</span>
+            {% else %}
+              <span class="ld-status unlisted">Unlisted</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="/items/{{ item['id'] }}" style="font-size:0.8rem;color:var(--rs-accent);">View</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="ld-empty">No individual items found for this lot yet.</div>
+    {% endif %}
+  </div>
+
+</div>
+
+<script>
+function filterLot(filter, btn) {
+  document.querySelectorAll('.ld-filter-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.querySelectorAll('#lot-items-table tbody tr').forEach(function(row) {
+    var status = row.dataset.status;
+    var qty    = parseFloat(row.dataset.qty);
+    var show = filter === 'all'
+      || (filter === 'sold'    && qty === 0)
+      || (filter === 'unsold'  && qty > 0)
+      || (filter === 'listed'  && status === 'listed' && qty > 0);
+    row.style.display = show ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

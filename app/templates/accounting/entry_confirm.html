@@ -226,9 +226,14 @@
       {# Purchase context: one chip per SKU #}
       {% for pi in purchase_items %}
       <span class="ec-chip">
-        <span class="ec-chip-label">Item {{ loop.index }}</span>
-        {{ pi.item_name }} &times; {{ pi.quantity }}
-        @ ${{ "%.4f"|format(pi.allocated_unit_cost) }}
+        {% if pi.is_lot %}
+          <span class="ec-chip-label">Lot {{ loop.index }}</span>
+          {{ pi.item_name }} — {{ pi.quantity }} items @ ${{ "%.4f"|format(pi.allocated_unit_cost) }}
+        {% else %}
+          <span class="ec-chip-label">Item {{ loop.index }}</span>
+          {{ pi.item_name }} &times; {{ pi.quantity }}
+          @ ${{ "%.4f"|format(pi.allocated_unit_cost) }}
+        {% endif %}
       </span>
       {% endfor %}
       {% endif %}
@@ -243,6 +248,14 @@
         <span class="ec-chip-label">Purchase tax</span>
         ${{ tas.purchase_tax_amount }}
       </span>
+      {% endif %}
+      {% if expense_splits_display %}
+      {% for es in expense_splits_display %}
+      <span class="ec-chip">
+        <span class="ec-chip-label">Expense</span>
+        {{ es.account_name }} — ${{ "%.2f"|format(es.amount) }}
+      </span>
+      {% endfor %}
       {% endif %}
       {% if tas.sales_tax_amount and tas.sales_tax_amount > 0 %}
       <span class="ec-chip">

@@ -154,7 +154,7 @@ Include: **TOTAL OWED TO HOLLY**
 
 ## Feature Backlog
 
-### [ ] Split Purchase Flow — Mixed Inventory + Expense on One Receipt
+### [x] Split Purchase Flow — Mixed Inventory + Expense on One Receipt
 
 **Phase 6 feature (post-MVP)**
 
@@ -218,6 +218,39 @@ def post_split_entry(answer_set):
         line.entry_id = entry.id
         db.add(line)
 ```
+
+---
+
+### [x] AI Assist — Detect & Route Mixed Inventory + Expense Purchases
+
+**Depends on:** Split Purchase Flow (above)
+
+**Goal:** Extend the NLP layer (`app/accounting/nlp.py`) so that when the user describes a purchase containing both inventory and non-inventory items, the AI detects the split and routes into the Split Purchase flow with pre-filled amounts — rather than forcing the user to pick a single template upfront.
+
+**Examples the AI should handle:**
+- "Bought 50 Funko Pops for $200 and a roll of bubble wrap for $12 from a wholesaler, paid with Chase debit"
+- "Amazon order — $180 in inventory plus $25 of shipping supplies, personal card"
+
+**Acceptance criteria:**
+- `NLPResult` gains optional fields: `is_split_purchase: bool`, `inventory_amount: Decimal | None`, `expense_splits: list[{account_code, amount, memo}] | None`
+- System prompt updated with split-purchase detection rules: if the user mentions both inventory and a non-inventory expense in the same transaction, set `is_split_purchase=True` and break out the amounts
+- `POST /accounting/entry/parse` checks `result.is_split_purchase` and redirects into the split purchase questionnaire sub-flow with pre-filled inventory and expense amounts
+- Confidence scores required for `inventory_amount` and each expense split; low-confidence splits fall through to the questionnaire for manual confirmation
+- Fallback: if AI is uncertain about the split, it routes to a standard BUY_INVENTORY session and surfaces a "Did you also buy non-inventory items?" prompt in the questionnaire
+
+**System prompt additions:**
+```
+MIXED PURCHASE (inventory + expense on same receipt):
+  If the description mentions BOTH inventory items AND non-inventory items
+  (e.g. bubble wrap, office supplies, software) on the same transaction:
+  - Set is_split_purchase: true
+  - Set inventory_amount: the portion that is inventory
+  - Set expense_splits: [{account_code, amount, memo}, ...] for each non-inventory line
+  - The sum of inventory_amount + all expense_splits must equal total_amount
+  Never guess a split; if uncertain, set is_split_purchase: false and flag in memo.
+```
+
+**Files:** `app/accounting/nlp.py`, `app/accounting/routes.py` (`entry_parse`, `_prefill_session_from_nlp`)
 
 ---
 

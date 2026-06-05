@@ -441,6 +441,32 @@ def migrate():
               AND brand IS NOT NULL AND TRIM(brand) != ''
         """)
 
+        # ── Inventory Lots ────────────────────────────────────────────────────
+        if not table_exists(conn, "inventory_lots"):
+            conn.execute("""
+            CREATE TABLE inventory_lots (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                journal_entry_id INTEGER REFERENCES journal_entries(id) ON DELETE SET NULL,
+                description      TEXT NOT NULL,
+                qty_received     INTEGER NOT NULL,
+                qty_remaining    INTEGER NOT NULL,
+                unit_cost        TEXT NOT NULL,
+                received_date    TEXT NOT NULL,
+                vendor           TEXT,
+                notes            TEXT,
+                created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_lots_entry ON inventory_lots(journal_entry_id)"
+            )
+
+        ensure_column(
+            conn, "items", "lot_id",
+            "lot_id INTEGER REFERENCES inventory_lots(id) ON DELETE SET NULL"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_items_lot ON items(lot_id)")
+
     conn.close()
     print("Migration complete.")
 

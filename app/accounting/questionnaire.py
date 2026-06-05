@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -17,6 +18,7 @@ InputType = Literal[
     "date",
     "account_picker",
     "inventory_picker",
+    "expense_splits",
     "file_upload",
 ]
 
@@ -46,6 +48,14 @@ _TEMPLATES_WITH_FREIGHT_IN: frozenset[str] = frozenset(
 )
 
 _TEMPLATES_WITH_SALES_TAX: frozenset[str] = frozenset({"SELL_INVENTORY_CASH"})
+
+# eBay-specific detail steps.
+_TEMPLATES_WITH_EBAY_FIELDS: frozenset[str] = frozenset({"SELL_INVENTORY_EBAY"})
+
+# Templates that deduct sold inventory (all sale templates).
+_TEMPLATES_SELL_INVENTORY: frozenset[str] = frozenset(
+    {"SELL_INVENTORY_CASH", "SELL_INVENTORY_EBAY"}
+)
 
 # Funding-source derivation (used in build_answer_set).
 _FUNDING_SOURCE: dict[str, str] = {
@@ -122,18 +132,53 @@ GLOBAL_FLOW: list[Step] = [
         shown_when=lambda a: _a(a, "template_id") == "BUY_EXPENSE_PERSONAL",
     ),
 
-    # ── 4. Sale inventory item (SELL_INVENTORY_CASH only) ──────────────────
+    # ── 4. Sale inventory item (cash or eBay sale) ──────────────────────────
     Step(
         id="inventory_link_sale",
         question="Which inventory item did you sell?",
         input_type="inventory_picker",
         maps_to="inventory_link",
         help_text="Choose the SKU sold and how many units were included in this sale.",
-        shown_when=lambda a: _a(a, "template_id") == "SELL_INVENTORY_CASH",
+        shown_when=lambda a: _a(a, "template_id") in ("SELL_INVENTORY_CASH", "SELL_INVENTORY_EBAY"),
+    ),
+
+    # ── 4a. eBay item sale price ─────────────────────────────────────────────
+    Step(
+        id="ebay_total_amount",
+        question="What was the item sale price? (not including shipping)",
+        input_type="number",
+        maps_to="total_amount",
+        help_text="Enter the price the buyer paid for the item only.",
+        shown_when=lambda a: _a(a, "template_id") == "SELL_INVENTORY_EBAY",
+    ),
+
+    # ── 4b. eBay shipping charged to buyer ───────────────────────────────────
+    Step(
+        id="ebay_shipping_charged",
+        question="How much did the buyer pay for shipping? (enter 0 for free shipping)",
+        input_type="number",
+        maps_to="ebay_shipping_charged",
+        optional=True,
+        default=Decimal("0"),
+        help_text="This is added to revenue. Enter 0 if you offered free shipping.",
+        shown_when=lambda a: _a(a, "template_id") == "SELL_INVENTORY_EBAY",
+    ),
+
+    # ── 4c. eBay fees ────────────────────────────────────────────────────────
+    Step(
+        id="ebay_fees_amount",
+        question="What were the total eBay fees for this sale?",
+        input_type="number",
+        maps_to="ebay_fees_amount",
+        optional=True,
+        default=Decimal("0"),
+        help_text="Include final value fee and any other fees eBay charged. Posts to eBay Fees expense.",
+        shown_when=lambda a: _a(a, "template_id") == "SELL_INVENTORY_EBAY",
     ),
 
     # ── 5. Total amount ──────────────────────────────────────────────────────
     # Skipped for BUY_INVENTORY / BUY_INVENTORY_PERSONAL — computed from line items.
+    # Skipped for SELL_INVENTORY_EBAY — captured as ebay_total_amount above.
     Step(
         id="total_amount",
         question="What was the total amount?",
@@ -143,6 +188,7 @@ GLOBAL_FLOW: list[Step] = [
         shown_when=lambda a: (
             _a(a, "template_id") != "REIMBURSE_OWNER"
             and _a(a, "template_id") not in _TEMPLATES_WITH_INVENTORY_LINK
+            and _a(a, "template_id") != "SELL_INVENTORY_EBAY"
         ),
     ),
 
@@ -238,6 +284,30 @@ GLOBAL_FLOW: list[Step] = [
         default=Decimal("0"),
         help_text="Enter the total sales tax charged at purchase. We'll capitalize it into your inventory cost.",
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_FREIGHT_IN,
+    ),
+
+    # ── 12c. Non-inventory expense splits ────────────────────────────────────
+    Step(
+        id="has_expense_splits",
+        question="Was anything else on this receipt NOT for resale inventory?",
+        input_type="multi_choice",
+        maps_to="has_expense_splits",
+        options=[
+            ("no", "No — everything on this receipt was inventory"),
+            ("yes", "Yes — I also bought supplies, tools, or other non-inventory items"),
+        ],
+        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK,
+    ),
+    Step(
+        id="expense_splits",
+        question="What non-inventory items were on this receipt?",
+        input_type="expense_splits",
+        maps_to="expense_splits",
+        help_text="Check each expense category and enter the amount. The remaining total goes to inventory.",
+        shown_when=lambda a: (
+            _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK
+            and _a(a, "has_expense_splits") == "yes"
+        ),
     ),
 
     # ── 13. Sales tax collected ──────────────────────────────────────────────
@@ -352,13 +422,14 @@ def record_answer(
 
 
 def go_back(session: QuestionnaireSession) -> Optional[str]:
-    """Undo the last answered step. Returns the step_id now at the top of history."""
+    """Undo the last answered step. Returns the step_id now at the top of history.
+
+    The answer is intentionally kept in session.answers so the step renders pre-filled.
+    record_answer overwrites it when the user re-submits.
+    """
     if len(session.history) < 2:
         return None
     last_id = session.history.pop()
-    last_step = _STEP_BY_ID.get(last_id)
-    if last_step:
-        session.answers.pop(last_step.maps_to, None)
     session.updated_at = datetime.utcnow().isoformat()
     return session.history[-1]
 
@@ -430,6 +501,7 @@ def build_answer_set(session: QuestionnaireSession) -> dict:
                     "sku": item.get("sku"),
                     "name": item.get("name"),
                     "quantity": qty,
+                    "is_lot": bool(item.get("is_lot", False)),
                 },
                 "unit_cost": cost,
                 "quantity": qty,
@@ -441,7 +513,18 @@ def build_answer_set(session: QuestionnaireSession) -> dict:
         ptax = d.get("purchase_tax_amount") or Decimal("0")
         if not isinstance(ptax, Decimal):
             ptax = Decimal(str(ptax)).quantize(Decimal("0.01"))
-        d["total_amount"] = (subtotal + freight + ptax).quantize(Decimal("0.01"))
+
+        # Add non-inventory expense splits to the grand total
+        raw_splits = d.get("expense_splits")
+        splits_total = Decimal("0")
+        if raw_splits and isinstance(raw_splits, list):
+            for s in raw_splits:
+                try:
+                    splits_total += Decimal(str(s.get("amount", "0"))).quantize(Decimal("0.01"))
+                except InvalidOperation:
+                    pass
+
+        d["total_amount"] = (subtotal + freight + ptax + splits_total).quantize(Decimal("0.01"))
 
     if template_id in _TEMPLATES_WITH_SALES_TAX and d.get("sales_tax_applies") != "yes":
         d["sales_tax_amount"] = Decimal("0")
@@ -472,6 +555,13 @@ def _coerce(step: Step, raw: Any) -> Any:
 
     if raw is None or raw == "":
         return step.default
+
+    if step.input_type == "expense_splits":
+        try:
+            parsed = json.loads(raw) if isinstance(raw, str) else raw
+            return parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
 
     if step.input_type == "number":
         try:

@@ -119,6 +119,8 @@
         {% include "accounting/_step_account_picker.html" %}
       {% elif step.input_type == "inventory_picker" %}
         {% include "accounting/_step_inventory_picker.html" %}
+      {% elif step.input_type == "expense_splits" %}
+        {% include "accounting/_step_expense_splits.html" %}
       {% elif step.input_type == "file_upload" %}
         {% include "accounting/_step_file_upload.html" %}
       {% endif %}

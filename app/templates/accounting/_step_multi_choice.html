@@ -36,7 +36,7 @@
   <label class="q-choice-label {% if current_val == value %}selected{% endif %}">
     <input type="radio" name="answer" value="{{ value }}"
            {% if current_val == value %}checked{% endif %}
-           onchange="this.form.submit()" />
+           onclick="this.form.submit()" />
     {{ label }}
   </label>
   {% endfor %}

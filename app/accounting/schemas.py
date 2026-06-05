@@ -7,6 +7,14 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, computed_field, model_validator
 
 
+class ExpenseSplit(BaseModel):
+    """One non-inventory expense line on a mixed purchase receipt."""
+
+    account_code: str
+    amount: Decimal
+    memo: Optional[str] = None
+
+
 class InventoryLink(BaseModel):
     """Link a journal-entry line to an inventory item (existing or to be created)."""
 
@@ -15,6 +23,7 @@ class InventoryLink(BaseModel):
     sku: Optional[str] = None       # link_existing: alt lookup when item_id unknown
     name: Optional[str] = None      # create_new: display name for the new item
     quantity: int = 1
+    is_lot: bool = False            # create_new: receive as N individual items each with qty=1
 
     @model_validator(mode="after")
     def _check_mode_fields(self) -> InventoryLink:
@@ -73,9 +82,18 @@ class TransactionAnswerSet(BaseModel):
     freight_in_amount: Optional[Decimal] = None
     purchase_tax_amount: Optional[Decimal] = None  # sales tax paid to retailer, capitalized into inventory
 
+    # ── Expense splits (BUY_INVENTORY / BUY_INVENTORY_PERSONAL only) ──────
+    # Non-inventory lines on the same receipt (e.g. bubble wrap, office supplies).
+    # These are expensed directly; only the remaining inventory portion is capitalized.
+    expense_splits: list[ExpenseSplit] = []
+
     # ── Sales tax (SELL_INVENTORY_CASH and similar) ───────────────────────
     sales_tax_amount: Optional[Decimal] = None
     sales_tax_jurisdiction_id: Optional[int] = None
+
+    # ── eBay sale details (SELL_INVENTORY_EBAY only) ──────────────────────
+    ebay_fees_amount: Optional[Decimal] = None       # eBay final value fee + other fees
+    ebay_shipping_charged: Optional[Decimal] = None  # shipping charged to buyer (0 if free)
 
     # ── Free-form ─────────────────────────────────────────────────────────
     memo: Optional[str] = None

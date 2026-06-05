@@ -651,6 +651,7 @@ def _resolve_inventory_purchase_context(
                 "quantity": li.quantity,
                 "allocated_total_cost": allocated_total,
                 "allocated_unit_cost": allocated_unit,
+                "is_lot": inv.is_lot,
             })
             continue
 
@@ -690,6 +691,52 @@ def _resolve_inventory_purchase_context(
         })
 
     return contexts
+
+
+def _build_split_purchase_lines(
+    tas: TransactionAnswerSet,
+    account_map: dict[str, int],
+    inventory_amount: Decimal,
+) -> list[JournalLineInput]:
+    """Build multi-debit journal lines for a BUY_INVENTORY purchase with expense splits.
+
+    Debit 1200 Inventory with the inventory portion, debit each expense split's
+    account, and credit the payment account (business funds) or Owner Contributions
+    (personal funds) for the full total.
+    """
+    lines: list[JournalLineInput] = []
+
+    lines.append(JournalLineInput(
+        account_id=account_map["1200"],
+        debit=inventory_amount,
+        memo=tas.memo,
+    ))
+
+    for split in tas.expense_splits:
+        if split.amount <= Decimal("0"):
+            continue
+        acct_id = account_map.get(split.account_code)
+        if acct_id is None:
+            raise ValueError(f"Expense account code '{split.account_code}' not found in chart of accounts.")
+        lines.append(JournalLineInput(
+            account_id=acct_id,
+            debit=split.amount,
+            memo=split.memo or tas.memo,
+        ))
+
+    if tas.template_id == "BUY_INVENTORY_PERSONAL":
+        credit_id = account_map["3100"]
+    else:
+        if tas.payment_account_id is None:
+            raise ValueError("BUY_INVENTORY requires a payment account.")
+        credit_id = tas.payment_account_id
+
+    lines.append(JournalLineInput(
+        account_id=credit_id,
+        credit=tas.total_amount,
+        memo=tas.memo,
+    ))
+    return lines
 
 
 @router.get("/", include_in_schema=False)
@@ -1499,6 +1546,49 @@ def receipt_file(
     )
 
 
+@router.get("/lots/{lot_id}", response_class=HTMLResponse)
+def lot_detail_page(
+    lot_id: int,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    lot = conn.execute(
+        "SELECT * FROM inventory_lots WHERE id=?", (lot_id,)
+    ).fetchone()
+    if not lot:
+        raise HTTPException(status_code=404, detail="Lot not found")
+
+    items = conn.execute(
+        """
+        SELECT i.id, i.sku, i.name, i.qty_on_hand, i.unit_cost, i.condition,
+               COALESCE(rl.status, 'unlisted') AS status
+        FROM items i
+        LEFT JOIN resale_listings rl ON rl.item_id = i.id
+        WHERE i.lot_id = ?
+        ORDER BY i.name
+        """,
+        (lot_id,),
+    ).fetchall()
+
+    unit_cost = Decimal(lot["unit_cost"])
+    qty_received = lot["qty_received"]
+    qty_remaining = lot["qty_remaining"]
+    qty_sold = qty_received - qty_remaining
+    total_value = (unit_cost * qty_received).quantize(Decimal("0.01"))
+    realized_cogs = (unit_cost * qty_sold).quantize(Decimal("0.01"))
+    unrealized_value = (unit_cost * qty_remaining).quantize(Decimal("0.01"))
+
+    return render(
+        "accounting/lot_detail.html", request,
+        lot=lot,
+        items=items,
+        qty_sold=qty_sold,
+        total_value=total_value,
+        realized_cogs=realized_cogs,
+        unrealized_value=unrealized_value,
+    )
+
+
 @router.get("/owner-balance", response_class=HTMLResponse)
 def owner_balance_page(
     request: Request,
@@ -1587,6 +1677,18 @@ def _prefill_session_from_nlp(session: QuestionnaireSession, result: NLPResult) 
     if result.memo and conf.get("memo", 0) >= CONFIDENCE_THRESHOLD:
         session.answers["memo"] = result.memo
         session.history.append("memo")
+
+    # Split purchase: prefill has_expense_splits + expense_splits when AI is confident
+    if (
+        result.is_split_purchase
+        and result.expense_splits
+        and conf.get("expense_splits", 0) >= CONFIDENCE_THRESHOLD
+        and template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")
+    ):
+        session.answers["has_expense_splits"] = "yes"
+        session.history.append("has_expense_splits")
+        session.answers["expense_splits"] = result.expense_splits
+        session.history.append("expense_splits")
 
 
 def _compute_remaining_steps(session: QuestionnaireSession) -> list[dict]:
@@ -1834,7 +1936,7 @@ def entry_step(
         if step.id == "inventory_link_sale":
             inventory_items = conn.execute(
                 """
-                SELECT id, sku, name
+                SELECT id, sku, name, notes, company, category, brand, tags, location, condition
                 FROM items
                 WHERE item_type='resale' AND qty_on_hand > 0
                 ORDER BY name
@@ -1842,8 +1944,19 @@ def entry_step(
             ).fetchall()
         else:
             inventory_items = conn.execute(
-                "SELECT id, sku, name FROM items ORDER BY name"
+                """
+                SELECT id, sku, name, notes, company, category, brand, tags, location, condition
+                FROM items ORDER BY name
+                """
             ).fetchall()
+
+    # For expense_splits: fetch all active expense accounts
+    expense_accounts = []
+    if step.input_type == "expense_splits":
+        expense_accounts = conn.execute(
+            "SELECT id, code, name, subtype FROM accounts "
+            "WHERE (subtype='expense' OR type='expense') AND is_active=1 ORDER BY code"
+        ).fetchall()
 
     return render(
         "accounting/questionnaire_step.html", request,
@@ -1854,6 +1967,7 @@ def entry_step(
         total=total,
         accounts=accounts,
         inventory_items=inventory_items,
+        expense_accounts=expense_accounts,
         owner_balance=owner_balance,
         error=error,
     )
@@ -1876,7 +1990,7 @@ def entry_answer(
 
     # Parse JSON answers for structured types
     raw: object
-    if step.input_type == "inventory_picker" and answer:
+    if step.input_type in ("inventory_picker", "expense_splits") and answer:
         try:
             raw = json.loads(answer)
         except json.JSONDecodeError:
@@ -1985,16 +2099,24 @@ def _build_summary_text(
             items_part = f" {n_items} SKUs"
         else:
             items_part = ""
+
+        # Expense splits summary
+        exp_note = ""
+        if tas.expense_splits:
+            exp_total = sum(s.amount for s in tas.expense_splits)
+            exp_note = f" + ${exp_total:.2f} in other expenses"
+
         if overhead > 0:
-            item_cost = tas.total_amount - overhead
+            inv_cost = tas.total_amount - overhead - sum(s.amount for s in tas.expense_splits)
             extras = []
             if freight > 0:
                 extras.append(f"${freight:.2f} shipping")
             if ptax > 0:
                 extras.append(f"${ptax:.2f} tax")
-            cost_part = f"${item_cost:.2f} + {' + '.join(extras)} = {amt} total"
+            cost_part = f"${inv_cost:.2f} + {' + '.join(extras)}{exp_note} = {amt} total"
         else:
-            cost_part = amt
+            inv_only = tas.total_amount - sum(s.amount for s in tas.expense_splits)
+            cost_part = f"${inv_only:.2f}{exp_note} = {amt} total" if tas.expense_splits else amt
         if tid == "BUY_INVENTORY_PERSONAL":
             return (
                 f"You bought{items_part} for {cost_part}{vendor_part} using personal funds. "
@@ -2005,7 +2127,7 @@ def _build_summary_text(
 
     if tid == "SELL_INVENTORY_CASH":
         tax = tas.sales_tax_amount or Decimal("0")
-        items_part = f" of {item_desc}" if item_desc else ""
+        items_part = f" of {inventory_item_name}" if inventory_item_name else ""
         if tax > 0:
             revenue = tas.total_amount - tax
             return (
@@ -2013,6 +2135,23 @@ def _build_summary_text(
                 f"= {amt} total."
             )
         return f"You recorded a sale{items_part} for {amt}."
+
+    if tid == "SELL_INVENTORY_EBAY":
+        items_part = f" of {inventory_item_name}" if inventory_item_name else ""
+        fees = tas.ebay_fees_amount or Decimal("0")
+        shipping = tas.ebay_shipping_charged or Decimal("0")
+        gross = tas.total_amount + shipping
+        net = gross - fees
+        parts = [f"${tas.total_amount:.2f} item price"]
+        if shipping > 0:
+            parts.append(f"${shipping:.2f} buyer shipping")
+        gross_str = f"${gross:.2f} gross"
+        fees_str = f"${fees:.2f} eBay fees" if fees > 0 else ""
+        net_str = f"${net:.2f} net deposit"
+        detail = " + ".join(parts) + f" = {gross_str}"
+        if fees_str:
+            detail += f" − {fees_str} = {net_str}"
+        return f"You recorded an eBay sale{items_part}: {detail}."
 
     if tid == "REIMBURSE_OWNER":
         to_acct = f" to {payment_account_name}" if payment_account_name else ""
@@ -2081,7 +2220,7 @@ def entry_preview_get(
             )
 
     sale_inventory_ctx: Optional[dict] = None
-    if tas.template_id == "SELL_INVENTORY_CASH":
+    if tas.template_id in ("SELL_INVENTORY_CASH", "SELL_INVENTORY_EBAY"):
         try:
             sale_inventory_ctx = _resolve_sale_inventory_context(conn, tas)
         except ValueError as exc:
@@ -2102,29 +2241,41 @@ def entry_preview_get(
 
     template = get_template(tas.template_id)
 
-    # Build account_map (code → id) and id → (code, name) for reverse lookup
+    # Build account_map (code → id) and reverse lookups
     acct_rows = conn.execute("SELECT id, code, name FROM accounts").fetchall()
     account_map: dict[str, int] = {r["code"]: r["id"] for r in acct_rows}
     id_to_acct: dict[int, dict] = {r["id"]: {"code": r["code"], "name": r["name"]} for r in acct_rows}
+    code_to_name: dict[str, str] = {r["code"]: r["name"] for r in acct_rows}
 
     try:
-        lines = resolve_lines(
-            template_id=tas.template_id,
-            total_amount=tas.total_amount,
-            account_map=account_map,
-            payment_account_id=tas.payment_account_id,
-            expense_category_account_id=tas.expense_category_account_id,
-            sales_tax_amount=tas.sales_tax_amount,
-            memo=tas.memo,
-            inventory_item_id=sale_inventory_ctx["item_id"] if sale_inventory_ctx else None,
+        is_split_purchase = (
+            tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")
+            and bool(tas.expense_splits)
         )
+        if is_split_purchase:
+            splits_total = sum(s.amount for s in tas.expense_splits)
+            inventory_amount = (tas.total_amount - splits_total).quantize(Decimal("0.01"))
+            lines = _build_split_purchase_lines(tas, account_map, inventory_amount)
+        else:
+            lines = resolve_lines(
+                template_id=tas.template_id,
+                total_amount=tas.total_amount,
+                account_map=account_map,
+                payment_account_id=tas.payment_account_id,
+                expense_category_account_id=tas.expense_category_account_id,
+                sales_tax_amount=tas.sales_tax_amount,
+                ebay_fees_amount=tas.ebay_fees_amount,
+                ebay_shipping_charged=tas.ebay_shipping_charged,
+                memo=tas.memo,
+                inventory_item_id=sale_inventory_ctx["item_id"] if sale_inventory_ctx else None,
+            )
     except Exception as exc:
         return RedirectResponse(
             url=f"/accounting/entry/step/{session_id}?error={quote(str(exc))}",
             status_code=303,
         )
 
-    if tas.template_id == "SELL_INVENTORY_CASH" and sale_inventory_ctx is not None:
+    if tas.template_id in ("SELL_INVENTORY_CASH", "SELL_INVENTORY_EBAY") and sale_inventory_ctx is not None:
         cogs_lines = [
             JournalLineInput(
                 account_id=account_map["5000"],
@@ -2161,7 +2312,7 @@ def entry_preview_get(
     if tas.expense_category_account_id and tas.expense_category_account_id in id_to_acct:
         expense_account_name = id_to_acct[tas.expense_category_account_id].get("name")
 
-    # inventory_purchase_ctx is now a list[dict]; build display data from it
+    # inventory_purchase_ctx is a list[dict]; build display data from it
     purchase_items: list[dict] = []
     inventory_item_name: Optional[str] = None  # kept for sale context
 
@@ -2174,9 +2325,21 @@ def entry_preview_get(
                 "quantity": ctx["quantity"],
                 "allocated_unit_cost": ctx["allocated_unit_cost"],
                 "allocated_total_cost": ctx["allocated_total_cost"],
+                "is_lot": ctx.get("is_lot", False),
             }
             for ctx in inventory_purchase_ctx
         ]
+
+    # Build display list for expense splits (with resolved account names)
+    expense_splits_display = [
+        {
+            "account_name": code_to_name.get(s.account_code, s.account_code),
+            "account_code": s.account_code,
+            "amount": s.amount,
+            "memo": s.memo,
+        }
+        for s in tas.expense_splits
+    ]
 
     summary_text = _build_summary_text(
         tas,
@@ -2201,6 +2364,7 @@ def entry_preview_get(
         expense_account_name=expense_account_name,
         inventory_item_name=inventory_item_name,
         purchase_items=purchase_items,
+        expense_splits_display=expense_splits_display,
         debit_total=debit_total,
         credit_total=credit_total,
         session_receipt_files=session_receipt_files,
@@ -2224,9 +2388,14 @@ def entry_back_to_edit(
     session_id: str = Form(...),
     conn: sqlite3.Connection = Depends(get_db),
 ):
-    """Undo the last step so the user can edit from the preview screen."""
+    """Return to the questionnaire from the confirm screen with all answers preserved.
+
+    Clears history so every step re-appears, but keeps session.answers intact so
+    each step renders pre-filled. The user walks through quickly (all inputs are
+    already filled in) and changes only what they want.
+    """
     session = _load_session(conn, session_id)
-    go_back(session)
+    session.history.clear()
     _save_session(conn, session)
     return RedirectResponse(
         url=f"/accounting/entry/step/{session_id}",
@@ -2306,13 +2475,93 @@ def _insert_new_inventory_purchase_item(
     return cur.lastrowid
 
 
+def _create_inventory_lot_with_items(
+    tx_conn: sqlite3.Connection,
+    *,
+    ctx: dict,
+    journal_entry_id: int,
+    entry_date: str,
+    vendor: Optional[str],
+) -> int:
+    """Insert one inventory_lots row then N individual items each with qty_on_hand=1.
+
+    Returns the new lot_id.
+    """
+    qty = ctx["quantity"]
+    unit_cost = ctx["allocated_unit_cost"]  # Decimal, already freight-allocated
+    lot_name = ctx["item_name"]
+
+    cur = tx_conn.execute(
+        """
+        INSERT INTO inventory_lots
+          (journal_entry_id, description, qty_received, qty_remaining,
+           unit_cost, received_date, vendor)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (journal_entry_id, lot_name, qty, qty, str(unit_cost), entry_date, vendor),
+    )
+    lot_id = cur.lastrowid
+
+    col_names = {r[1] for r in tx_conn.execute("PRAGMA table_info(items)").fetchall()}
+    width = len(str(qty))
+
+    for i in range(1, qty + 1):
+        item_name = f"{lot_name} #{str(i).zfill(width)}"
+        sku = get_next_sku(tx_conn, _DEFAULT_NEW_RESALE_COMPANY, _DEFAULT_NEW_RESALE_CODE)
+        values: dict[str, object] = {
+            "item_type": "resale",
+            "sku": sku,
+            "name": item_name,
+            "qty_on_hand": 1,
+            "unit_cost": float(unit_cost),
+            "unit": "each",
+        }
+        if "lot_id" in col_names:
+            values["lot_id"] = lot_id
+        if "company" in col_names:
+            values["company"] = _DEFAULT_NEW_RESALE_COMPANY
+        if "brand_code" in col_names:
+            values["brand_code"] = _DEFAULT_NEW_RESALE_CODE
+        if "category" in col_names:
+            values["category"] = "Collectibles"
+
+        cols = ", ".join(values.keys())
+        placeholders = ", ".join("?" for _ in values)
+        tx_conn.execute(
+            f"INSERT INTO items ({cols}) VALUES ({placeholders})",
+            tuple(values.values()),
+        )
+
+    return lot_id
+
+
+def _apply_lot_purchases(
+    tx_conn: sqlite3.Connection,
+    lot_contexts: list[dict],
+    journal_entry_id: int,
+    entry_date: str,
+    vendor: Optional[str],
+) -> None:
+    """Create inventory_lots rows + individual items for all lot-mode purchase lines."""
+    for ctx in lot_contexts:
+        _create_inventory_lot_with_items(
+            tx_conn,
+            ctx=ctx,
+            journal_entry_id=journal_entry_id,
+            entry_date=entry_date,
+            vendor=vendor,
+        )
+
+
 def _apply_inventory_purchase(
     tx_conn: sqlite3.Connection,
     req: PostEntryRequest,
     purchase_ctx: list[dict],
 ) -> None:
-    """Insert or update all purchased inventory items before posting the entry."""
+    """Insert or update all non-lot purchased inventory items before posting the entry."""
     for ctx in purchase_ctx:
+        if ctx.get("is_lot"):
+            continue  # lots are created in after_insert once the entry_id exists
         if ctx["mode"] == "create_new":
             _insert_new_inventory_purchase_item(
                 tx_conn,
@@ -2371,7 +2620,7 @@ def entry_confirm(
             )
 
     sale_inventory_ctx: Optional[dict] = None
-    if tas.template_id == "SELL_INVENTORY_CASH":
+    if tas.template_id in ("SELL_INVENTORY_CASH", "SELL_INVENTORY_EBAY"):
         try:
             sale_inventory_ctx = _resolve_sale_inventory_context(conn, tas)
         except ValueError as exc:
@@ -2412,16 +2661,27 @@ def entry_confirm(
     account_map: dict[str, int] = {r["code"]: r["id"] for r in acct_rows}
 
     try:
-        lines = resolve_lines(
-            template_id=tas.template_id,
-            total_amount=tas.total_amount,
-            account_map=account_map,
-            payment_account_id=tas.payment_account_id,
-            expense_category_account_id=tas.expense_category_account_id,
-            sales_tax_amount=tas.sales_tax_amount,
-            memo=tas.memo,
-            inventory_item_id=inventory_item_id,
+        is_split_purchase = (
+            tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")
+            and bool(tas.expense_splits)
         )
+        if is_split_purchase:
+            splits_total = sum(s.amount for s in tas.expense_splits)
+            inventory_amount = (tas.total_amount - splits_total).quantize(Decimal("0.01"))
+            lines = _build_split_purchase_lines(tas, account_map, inventory_amount)
+        else:
+            lines = resolve_lines(
+                template_id=tas.template_id,
+                total_amount=tas.total_amount,
+                account_map=account_map,
+                payment_account_id=tas.payment_account_id,
+                expense_category_account_id=tas.expense_category_account_id,
+                sales_tax_amount=tas.sales_tax_amount,
+                ebay_fees_amount=tas.ebay_fees_amount,
+                ebay_shipping_charged=tas.ebay_shipping_charged,
+                memo=tas.memo,
+                inventory_item_id=inventory_item_id,
+            )
     except Exception as exc:
         return RedirectResponse(
             url=f"/accounting/entry/preview/{session_id}?error={quote(str(exc))}",
@@ -2444,7 +2704,7 @@ def entry_confirm(
     )
 
     try:
-        if tas.template_id == "SELL_INVENTORY_CASH" and sale_inventory_ctx is not None:
+        if tas.template_id in ("SELL_INVENTORY_CASH", "SELL_INVENTORY_EBAY") and sale_inventory_ctx is not None:
             cogs_req = PostEntryRequest(
                 entry_date=tas.entry_date,
                 description=f"Auto COGS — {description}",
@@ -2478,13 +2738,37 @@ def entry_confirm(
                     """,
                     (float(sale_inventory_ctx["quantity"]), inventory_item_id),
                 )
+                # Decrement lot qty_remaining when selling a lot-sourced item.
+                # The subquery returns NULL for non-lot items, so this is a safe no-op.
+                tx_conn.execute(
+                    """
+                    UPDATE inventory_lots
+                    SET qty_remaining = MAX(0, qty_remaining - ?)
+                    WHERE id = (SELECT lot_id FROM items WHERE id = ? AND lot_id IS NOT NULL)
+                    """,
+                    (float(sale_inventory_ctx["quantity"]), inventory_item_id),
+                )
 
             entry_id = post_entries(conn, [req, cogs_req], after_insert=_after_sale_insert)[0]
         elif tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL") and inventory_purchase_ctx is not None:
+            lot_ctxs = [c for c in inventory_purchase_ctx if c.get("is_lot")]
+
             def _before_inventory_insert(tx_conn: sqlite3.Connection) -> None:
                 _apply_inventory_purchase(tx_conn, req, inventory_purchase_ctx)
 
-            entry_id = post_entries(conn, [req], before_insert=_before_inventory_insert)[0]
+            def _after_inventory_insert(
+                tx_conn: sqlite3.Connection, eids: list[int]
+            ) -> None:
+                _apply_lot_purchases(
+                    tx_conn, lot_ctxs, eids[0],
+                    tas.entry_date.isoformat(), tas.vendor,
+                )
+
+            entry_id = post_entries(
+                conn, [req],
+                before_insert=_before_inventory_insert,
+                after_insert=_after_inventory_insert if lot_ctxs else None,
+            )[0]
         else:
             entry_id = post_entry(conn, req)
     except (EmptyEntryError, UnbalancedEntryError) as exc:

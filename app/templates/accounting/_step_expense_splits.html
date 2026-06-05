@@ -1,0 +1,202 @@
+<style>
+  .es-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .es-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--rs-border);
+    border-radius: 10px;
+    background: var(--rs-surface);
+    transition: border-color 0.12s;
+  }
+  .es-row.active {
+    border-color: var(--rs-accent);
+    background: rgba(47, 143, 115, 0.04);
+  }
+  .es-cb {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    accent-color: var(--rs-accent);
+    cursor: pointer;
+  }
+  .es-label {
+    flex: 1;
+    font-size: 0.93rem;
+    color: var(--rs-text);
+    cursor: pointer;
+  }
+  .es-code {
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    font-size: 0.75rem;
+    background: var(--rs-surface-deep);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--rs-muted);
+  }
+  .es-amt {
+    width: 110px;
+    padding: 7px 10px;
+    border: 1px solid var(--rs-border);
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: #fcfffd;
+    text-align: right;
+    transition: border-color 0.12s, opacity 0.12s;
+  }
+  .es-amt:disabled {
+    opacity: 0.35;
+    background: var(--rs-surface-deep);
+    cursor: not-allowed;
+  }
+  .es-amt:focus { outline: none; border-color: var(--rs-accent); }
+  .es-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--rs-surface-deep);
+    border-radius: 10px;
+    font-size: 0.88rem;
+    color: var(--rs-muted);
+  }
+  .es-total-val {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--rs-text);
+  }
+  .es-none-msg {
+    font-size: 0.85rem;
+    color: var(--rs-muted);
+    margin-top: 8px;
+  }
+</style>
+
+<input type="hidden" name="answer" id="q-split-answer" value="[]" />
+
+{% if expense_accounts %}
+<div class="es-list" id="es-list">
+  {% for acct in expense_accounts %}
+  <div class="es-row" id="es-row-{{ acct['code'] }}">
+    <input
+      type="checkbox"
+      class="es-cb"
+      id="es-cb-{{ acct['code'] }}"
+      value="{{ acct['code'] }}"
+      onchange="esSyncRow(this)"
+    />
+    <label class="es-label" for="es-cb-{{ acct['code'] }}">
+      {{ acct['name'] }}
+      <span class="es-code">{{ acct['code'] }}</span>
+    </label>
+    <input
+      type="number"
+      class="es-amt"
+      id="es-amt-{{ acct['code'] }}"
+      min="0.01"
+      step="0.01"
+      placeholder="$0.00"
+      disabled
+      oninput="esUpdateTotal()"
+    />
+  </div>
+  {% endfor %}
+</div>
+
+<div class="es-footer">
+  <span>Non-inventory expense total</span>
+  <span class="es-total-val">$<span id="es-total">0.00</span></span>
+</div>
+
+<script>
+var PREFILL_SPLITS = {{ (answers.get('expense_splits') or []) | tojson }};
+
+(function () {
+  window.esSyncRow = function (cb) {
+    var row = document.getElementById('es-row-' + cb.value);
+    var amt = document.getElementById('es-amt-' + cb.value);
+    amt.disabled = !cb.checked;
+    if (!cb.checked) {
+      amt.value = '';
+    } else {
+      amt.focus();
+    }
+    row.classList.toggle('active', cb.checked);
+    esUpdateTotal();
+  };
+
+  window.esUpdateTotal = function () {
+    var total = 0;
+    document.querySelectorAll('.es-cb:checked').forEach(function (cb) {
+      var v = parseFloat(document.getElementById('es-amt-' + cb.value).value) || 0;
+      total += v;
+    });
+    document.getElementById('es-total').textContent = total.toFixed(2);
+    esSerialize();
+  };
+
+  function esSerialize() {
+    var splits = [];
+    document.querySelectorAll('.es-cb:checked').forEach(function (cb) {
+      var v = parseFloat(document.getElementById('es-amt-' + cb.value).value) || 0;
+      if (v > 0) {
+        splits.push({ account_code: cb.value, amount: v.toFixed(2) });
+      }
+    });
+    document.getElementById('q-split-answer').value = JSON.stringify(splits);
+  }
+
+  document.getElementById('q-answer').addEventListener('submit', function (e) {
+    var missing = false;
+    document.querySelectorAll('.es-cb:checked').forEach(function (cb) {
+      var v = parseFloat(document.getElementById('es-amt-' + cb.value).value) || 0;
+      if (v <= 0) { missing = true; }
+    });
+    if (missing) {
+      e.preventDefault();
+      alert('Please enter an amount greater than $0.00 for each checked category.');
+      return;
+    }
+    var splits = [];
+    document.querySelectorAll('.es-cb:checked').forEach(function (cb) {
+      var v = parseFloat(document.getElementById('es-amt-' + cb.value).value) || 0;
+      if (v > 0) {
+        splits.push({ account_code: cb.value, amount: v.toFixed(2) });
+      }
+    });
+    if (splits.length === 0) {
+      e.preventDefault();
+      alert('Check at least one expense category and enter an amount, or go back and choose "No".');
+      return;
+    }
+    document.getElementById('q-split-answer').value = JSON.stringify(splits);
+  });
+
+  // Pre-fill from saved answers when returning via "← Edit answers"
+  if (PREFILL_SPLITS && PREFILL_SPLITS.length > 0) {
+    PREFILL_SPLITS.forEach(function (s) {
+      var cb = document.getElementById('es-cb-' + s.account_code);
+      if (!cb) return;
+      cb.checked = true;
+      var row = document.getElementById('es-row-' + s.account_code);
+      if (row) row.classList.add('active');
+      var amt = document.getElementById('es-amt-' + s.account_code);
+      if (amt) {
+        amt.disabled = false;
+        amt.value = parseFloat(s.amount || 0).toFixed(2);
+      }
+    });
+    esUpdateTotal();
+  }
+})();
+</script>
+
+{% else %}
+<p class="es-none-msg">No expense accounts found. Add expense accounts in the chart of accounts first.</p>
+{% endif %}

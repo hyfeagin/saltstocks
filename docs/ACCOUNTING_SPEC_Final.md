@@ -2026,10 +2026,10 @@ Check items off as they are completed. Items are ordered so each one can be done
 
 - [x] Create `app/accounting/nlp.py` — Anthropic API call: sends user text + template catalog + account list, receives partial `TransactionAnswerSet` JSON with per-field confidence scores
 - [x] Add "Talk to AI" option on entry chooser screen (`GET /accounting/entry/start`) — shown only when AI mode is enabled in settings
-- [ ] `POST /accounting/entry/parse` — body: `{description}`; calls `nlp.py`, validates output, returns partial answer-set + list of remaining low-confidence questionnaire steps
-- [ ] Hand-off: any field with confidence < 0.7 or missing → injects corresponding questionnaire step before Confirm screen
-- [ ] Add AI mode enable/disable setting to accounting settings page
-- [ ] Fallback: if Anthropic API unreachable, show notice and open questionnaire directly
+- [x] `POST /accounting/entry/parse` — body: `{description}`; calls `nlp.py`, validates output, returns partial answer-set + list of remaining low-confidence questionnaire steps
+- [x] Hand-off: any field with confidence < 0.7 or missing → injects corresponding questionnaire step before Confirm screen
+- [x] Add AI mode enable/disable setting to accounting settings page
+- [x] Fallback: if Anthropic API unreachable, show notice and open questionnaire directly
 
 ---
 
