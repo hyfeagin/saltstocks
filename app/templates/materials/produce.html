@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .form-card { max-width:700px; }
+  .form-group { margin-bottom:1rem; }
+  label { display:block; font-weight:500; margin-bottom:.3rem; font-size:.9rem; }
+  input[type=text], input[type=number], input[type=date], select, textarea {
+    width:100%; padding:.4rem .6rem; border:1px solid #ccc; border-radius:4px;
+    font-size:.95rem; box-sizing:border-box;
+  }
+  textarea { min-height:60px; resize:vertical; }
+  .hint { font-size:.8rem; color:#888; margin-top:.2rem; }
+  .btn { padding:.4rem .9rem; border-radius:4px; font-size:.9rem; cursor:pointer; border:none; text-decoration:none; display:inline-block; }
+  .btn-primary { background:var(--ss-accent); color:#fff; }
+  .btn-ghost { background:transparent; border:1px solid #ccc; color:#333; }
+  .btn-danger { background:#dc3545; color:#fff; }
+  .btn-sm { padding:.25rem .6rem; font-size:.8rem; }
+  .error-msg { background:#fdecea; border:1px solid #f5c2c7; color:#842029; padding:.5rem .8rem; border-radius:4px; margin-bottom:1rem; }
+  .form-row { display:flex; gap:.75rem; }
+  .form-row .form-group { flex:1; }
+  .section-label { font-weight:600; font-size:.95rem; margin:1.5rem 0 .5rem; border-bottom:1px solid #ddd; padding-bottom:.3rem; }
+  .mat-table { width:100%; border-collapse:collapse; font-size:.9rem; margin-bottom:.5rem; }
+  .mat-table th { text-align:left; border-bottom:2px solid #ddd; padding:.35rem .4rem; color:#555; font-weight:600; }
+  .mat-table td { padding:.3rem .4rem; border-bottom:1px solid #eee; vertical-align:middle; }
+  .mat-table select, .mat-table input { font-size:.88rem; padding:.25rem .4rem; }
+  .cogs-box { background:#f0f4f8; border-radius:6px; padding:.75rem 1rem; margin:1rem 0; }
+  .cogs-box .cogs-total { font-size:1.05rem; font-weight:600; }
+  .cogs-box .cogs-per-unit { color:#555; font-size:.9rem; margin-top:.2rem; }
+  .finished-toggle { display:flex; gap:.75rem; margin-bottom:.75rem; }
+  .finished-toggle label { font-weight:400; display:flex; align-items:center; gap:.3rem; cursor:pointer; }
+  .stock-badge { font-size:.78rem; color:#666; margin-left:.3rem; }
+</style>
+
+<h1>Record Production Run</h1>
+{% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+
+<div class="form-card">
+<form method="post" action="/materials/produce" id="produce-form">
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="recipe_id">Recipe (optional)</label>
+      <select id="recipe_id" name="recipe_id" onchange="loadRecipe(this.value)">
+        <option value="">— Ad-hoc (no recipe) —</option>
+        {% for r in recipes %}
+        <option value="{{ r.id }}"
+                data-yield="{{ r.yield_qty }}"
+                data-unit="{{ r.yield_unit }}"
+                {{ 'selected' if selected_recipe and selected_recipe.id == r.id else '' }}>
+          {{ r.name }} ({{ r.yield_qty }} {{ r.yield_unit }}/batch)
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="batches">Number of Batches</label>
+      <input id="batches" name="batches" type="number" step="0.5" min="0.5" value="1"
+             oninput="recalcAll()">
+    </div>
+  </div>
+
+  <div class="form-group" id="recipe-name-group" style="{{ '' if not selected_recipe else 'display:none' }}">
+    <label for="recipe_name_override">Run Label <span style="font-weight:400;color:#888;">(if no recipe)</span></label>
+    <input id="recipe_name_override" name="recipe_name_override" type="text"
+           placeholder="e.g. Custom bath bomb batch" value="">
+  </div>
+
+  <div class="form-group">
+    <label for="run_date">Production Date</label>
+    <input id="run_date" name="run_date" type="date" value="{{ today }}">
+  </div>
+
+  <!-- Material consumption table -->
+  <div class="section-label">Materials Used</div>
+  <table class="mat-table" id="mat-table">
+    <thead>
+      <tr>
+        <th>Material</th>
+        <th>Qty Used</th>
+        <th>Unit</th>
+        <th>Cost / unit</th>
+        <th>Line Total</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="mat-tbody">
+      {% if recipe_lines %}
+        {% for ln in recipe_lines %}
+        <tr class="mat-row"
+            data-material-id="{{ ln.material_id }}"
+            data-qty-per-batch="{{ ln.qty_per_batch }}"
+            data-unit="{{ ln.unit }}"
+            data-unit-cost="{{ '%.4f'|format(ln.unit_cost) }}">
+          <td>
+            <input type="hidden" name="material_ids" value="{{ ln.material_id }}">
+            <strong>{{ ln.material_name }}</strong>
+            <span class="stock-badge">({{ '%.2f'|format(ln.qty_on_hand) }} {{ ln.unit }} on hand)</span>
+          </td>
+          <td><input type="number" name="qty_useds" step="0.001" min="0"
+                     value="{{ ln.qty_per_batch }}" class="qty-input" style="width:6rem;"
+                     oninput="updateRowCost(this)"></td>
+          <td><input type="hidden" name="units" value="{{ ln.unit }}">{{ ln.unit }}</td>
+          <td>
+            <input type="hidden" name="unit_costs" value="{{ '%.4f'|format(ln.unit_cost) }}" class="uc-hidden">
+            <span class="uc-display">${{ '%.4f'|format(ln.unit_cost) }}</span>
+          </td>
+          <td class="line-total">${{ '%.2f'|format(ln.unit_cost * ln.qty_per_batch) }}</td>
+          <td><button type="button" class="btn btn-danger btn-sm" onclick="removeMatRow(this)">✕</button></td>
+        </tr>
+        {% endfor %}
+      {% endif %}
+    </tbody>
+  </table>
+  <button type="button" class="btn btn-ghost btn-sm" onclick="addMatRow()">+ Add material</button>
+
+  <div class="cogs-box" id="cogs-box">
+    <div class="cogs-total">Total COGS: <span id="total-cogs">$0.00</span></div>
+    <div class="cogs-per-unit">Cost per finished unit: <span id="per-unit">—</span></div>
+  </div>
+
+  <!-- Finished item -->
+  <div class="section-label">Finished Item</div>
+
+  <div class="finished-toggle">
+    <label><input type="radio" name="_finished_mode" value="existing" checked onchange="toggleFinished()"> Link to existing inventory item</label>
+    <label><input type="radio" name="_finished_mode" value="new" onchange="toggleFinished()"> Create new inventory item</label>
+    <label><input type="radio" name="_finished_mode" value="none" onchange="toggleFinished()"> Don't track as inventory</label>
+  </div>
+
+  <div id="finished-existing">
+    <div class="form-group">
+      <label for="finished_item_id">Inventory Item</label>
+      <select id="finished_item_id" name="finished_item_id">
+        <option value="">— select item —</option>
+        {% for fi in finished_items %}
+        <option value="{{ fi.id }}">{{ fi.name }}{% if fi.sku %} ({{ fi.sku }}){% endif %} — {{ '%.0f'|format(fi.qty_on_hand) }} on hand</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div id="finished-new" style="display:none;">
+    <div class="form-group">
+      <label for="finished_item_name_new">New Item Name</label>
+      <input id="finished_item_name_new" name="finished_item_name_new" type="text"
+             placeholder="e.g. Bath Bomb 4oz — Lavender">
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="finished_qty">Qty Produced</label>
+      <input id="finished_qty" name="finished_qty" type="number" step="1" min="0"
+             value="{{ (selected_recipe.yield_qty | int) if selected_recipe else '' }}"
+             oninput="updatePerUnit()" placeholder="e.g. 24">
+      <div class="hint">Units added to inventory. Used to calculate cost per unit.</div>
+    </div>
+    <div class="form-group" style="align-self:flex-end;">
+      <div class="cogs-box" style="margin:0;">
+        Cost per unit: <strong id="per-unit2">—</strong>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-group">
+    <label for="notes">Notes (optional)</label>
+    <textarea id="notes" name="notes" placeholder="Batch notes, observations…"></textarea>
+  </div>
+
+  <div style="display:flex;gap:.6rem;margin-top:1.5rem;">
+    <button class="btn btn-primary" type="submit">Record Production Run</button>
+    <a class="btn btn-ghost" href="/materials">Cancel</a>
+  </div>
+
+</form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const RECIPE_DATA = {
+  {% for r in recipes %}
+  {{ r.id }}: { yieldQty: {{ r.yield_qty }}, yieldUnit: {{ r.yield_unit|tojson }} },
+  {% endfor %}
+};
+
+const ALL_MATERIALS = [
+  {% for m in (recipe_lines if recipe_lines else []) %}{% endfor %}
+  /* populated from server for ad-hoc rows */
+];
+
+// ── recipe load ───────────────────────────────────────────────────────────────
+function loadRecipe(recipeId) {
+  const nameGroup = document.getElementById('recipe-name-group');
+  nameGroup.style.display = recipeId ? 'none' : '';
+  if (!recipeId) return;
+  // Navigate to same page with recipe_id so server renders lines
+  window.location.href = '/materials/produce?recipe_id=' + recipeId;
+}
+
+// ── ad-hoc row add ────────────────────────────────────────────────────────────
+function addMatRow() {
+  const tbody = document.getElementById('mat-tbody');
+  const tr = document.createElement('tr');
+  tr.className = 'mat-row';
+  tr.innerHTML = `
+    <td>
+      <input type="hidden" name="material_ids" value="">
+      <select style="width:100%;" onchange="matSelected(this)">
+        <option value="">— choose material —</option>
+        <!-- filled via fetch -->
+      </select>
+    </td>
+    <td><input type="number" name="qty_useds" step="0.001" min="0" value="1"
+               class="qty-input" style="width:6rem;" oninput="updateRowCost(this)"></td>
+    <td>
+      <input type="hidden" name="units" value="each">
+      <span class="unit-label">—</span>
+    </td>
+    <td>
+      <input type="hidden" name="unit_costs" value="0" class="uc-hidden">
+      <span class="uc-display">—</span>
+    </td>
+    <td class="line-total">$0.00</td>
+    <td><button type="button" class="btn btn-danger btn-sm" onclick="removeMatRow(this)">✕</button></td>`;
+  tbody.appendChild(tr);
+  fetchMaterialOptions(tr.querySelector('select'));
+}
+
+function fetchMaterialOptions(sel) {
+  // Build options from hidden material list via fetch
+  fetch('/materials?_json=1')
+    .then(r => r.json()).catch(() => null)
+    .then(data => {
+      if (!data) return;
+      let html = '<option value="">— choose material —</option>';
+      for (const m of data) {
+        html += `<option value="${m.id}" data-cost="${m.unit_cost}" data-unit="${m.unit}">${m.name} (${m.unit})</option>`;
+      }
+      sel.innerHTML = html;
+    });
+}
+
+function matSelected(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  const row = sel.closest('tr');
+  const cost = opt.dataset.cost || '0';
+  const unit = opt.dataset.unit || 'each';
+  row.querySelector('input[name=material_ids]').value = opt.value;
+  row.querySelector('input[name=units]').value = unit;
+  row.querySelector('.unit-label').textContent = unit;
+  row.querySelector('.uc-hidden').value = cost;
+  row.querySelector('.uc-display').textContent = '$' + parseFloat(cost).toFixed(4);
+  updateRowCost(row.querySelector('.qty-input'));
+}
+
+function removeMatRow(btn) {
+  btn.closest('tr').remove();
+  recalcAll();
+}
+
+// ── cost calc ─────────────────────────────────────────────────────────────────
+function updateRowCost(input) {
+  const row = input.closest('tr');
+  const cost = parseFloat(row.querySelector('.uc-hidden').value || 0);
+  const qty  = parseFloat(input.value || 0);
+  row.querySelector('.line-total').textContent = '$' + (cost * qty).toFixed(2);
+  recalcAll();
+}
+
+function recalcAll() {
+  let total = 0;
+  document.querySelectorAll('.mat-row').forEach(row => {
+    const cost = parseFloat(row.querySelector('.uc-hidden').value || 0);
+    const qty  = parseFloat(row.querySelector('.qty-input').value || 0);
+    // If recipe row, scale by batches
+    const qpb  = parseFloat(row.dataset.qtyPerBatch || 0);
+    if (qpb) {
+      // recipe row: update qty based on batches
+      const batches = parseFloat(document.getElementById('batches').value || 1);
+      const newQty  = (qpb * batches).toFixed(3);
+      row.querySelector('.qty-input').value = newQty;
+      row.querySelector('.line-total').textContent = '$' + (cost * parseFloat(newQty)).toFixed(2);
+      total += cost * parseFloat(newQty);
+    } else {
+      total += cost * qty;
+    }
+  });
+  document.getElementById('total-cogs').textContent = '$' + total.toFixed(2);
+  updatePerUnit(total);
+
+  // Also update finished_qty from recipe yield × batches
+  const recipeId = document.getElementById('recipe_id').value;
+  if (recipeId && RECIPE_DATA[recipeId]) {
+    const batches = parseFloat(document.getElementById('batches').value || 1);
+    const fqty = Math.round(RECIPE_DATA[recipeId].yieldQty * batches);
+    document.getElementById('finished_qty').value = fqty;
+  }
+}
+
+function updatePerUnit(totalOverride) {
+  const total = totalOverride !== undefined
+    ? totalOverride
+    : parseFloat(document.getElementById('total-cogs').textContent.replace('$','') || 0);
+  const fqty  = parseFloat(document.getElementById('finished_qty').value || 0);
+  const cpu   = fqty > 0 ? (total / fqty).toFixed(4) : '—';
+  const label = fqty > 0 ? ('$' + cpu) : '—';
+  document.getElementById('per-unit').textContent = label;
+  document.getElementById('per-unit2').textContent = label;
+}
+
+function toggleFinished() {
+  const mode = document.querySelector('input[name=_finished_mode]:checked').value;
+  document.getElementById('finished-existing').style.display = mode === 'existing' ? '' : 'none';
+  document.getElementById('finished-new').style.display      = mode === 'new'      ? '' : 'none';
+  // clear the hidden field for the other mode
+  if (mode !== 'existing') document.getElementById('finished_item_id').value = '';
+  if (mode !== 'new')      document.getElementById('finished_item_name_new').value = '';
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  recalcAll();
+  toggleFinished();
+});
+</script>
+{% endblock %}

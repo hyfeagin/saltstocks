@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "saltstocks",
+      "runtimeExecutable": "/Users/hollyfeagin/Documents/saltstocks/.venv/bin/uvicorn",
+      "runtimeArgs": ["app.main:app", "--reload", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

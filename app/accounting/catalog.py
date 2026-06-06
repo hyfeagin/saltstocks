@@ -65,6 +65,29 @@ _TEMPLATES: list[Template] = [
         credit_account_code="4000", credit_from_field=None,
         required_fields=("total_amount", "payment_account_id"),
     ),
+    # ── Material purchases ────────────────────────────────────────────────
+    Template(
+        id="BUY_MATERIALS",
+        name="Bought production materials (business funds)",
+        debit_account_code="1200", debit_from_field=None,
+        credit_account_code=None,  credit_from_field="payment_account_id",
+        required_fields=("total_amount", "payment_account_id"),
+    ),
+    Template(
+        id="BUY_MATERIALS_PERSONAL",
+        name="Bought production materials (personal funds)",
+        debit_account_code="1200", debit_from_field=None,
+        credit_account_code="3100", credit_from_field=None,
+        required_fields=("total_amount",),
+    ),
+    # ── Production run (system-only, never shown in questionnaire) ────────
+    Template(
+        id="PRODUCTION_RUN",
+        name="Production run — materials converted to finished goods",
+        debit_account_code="1200", debit_from_field=None,
+        credit_account_code="1200", credit_from_field=None,
+        required_fields=("total_amount",),
+    ),
     Template(
         id="SELL_INVENTORY_EBAY",
         name="Sold on eBay (fees & shipping included)",

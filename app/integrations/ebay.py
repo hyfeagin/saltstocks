@@ -53,9 +53,12 @@ def refresh_access_token(settings: EbaySettings, timeout_seconds: int = 20) -> s
             "Missing eBay credentials. Configure client_id, client_secret, and refresh_token first."
         )
 
+    env = (settings.environment or "SANDBOX").upper()
+    endpoint = OAUTH_ENDPOINT if env == "PRODUCTION" else OAUTH_ENDPOINT_SANDBOX
+
     try:
         response = requests.post(
-            OAUTH_ENDPOINT,
+            endpoint,
             auth=(client_id, client_secret),
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             data={
@@ -238,5 +241,13 @@ def _best_error_message(response: requests.Response) -> str:
     message = payload.get("message")
     if isinstance(message, str) and message.strip():
         return message.strip()
+
+    # OAuth 2.0 error format: {"error": "...", "error_description": "..."}
+    error_desc = payload.get("error_description")
+    if isinstance(error_desc, str) and error_desc.strip():
+        return error_desc.strip()
+    error_code = payload.get("error")
+    if isinstance(error_code, str) and error_code.strip():
+        return error_code.strip()
 
     return "No details returned."

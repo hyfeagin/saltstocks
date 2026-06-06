@@ -154,7 +154,6 @@ def ebay_settings_save(
     client_id: str = Form(""),
     client_secret: str = Form(""),
     environment: str = Form(DEFAULT_ENVIRONMENT),
-    refresh_token: str = Form(""),
     ru_name: str = Form(""),
     conn: sqlite3.Connection = Depends(get_db),
 ):
@@ -166,11 +165,10 @@ def ebay_settings_save(
         conn.execute(
             """
             INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, ru_name, updated_at)
-            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            VALUES (?, ?, ?, '', ?, datetime('now'))
             ON CONFLICT(environment) DO UPDATE SET
               client_id=excluded.client_id,
               client_secret=excluded.client_secret,
-              refresh_token=excluded.refresh_token,
               ru_name=excluded.ru_name,
               updated_at=datetime('now')
             """,
@@ -178,7 +176,6 @@ def ebay_settings_save(
                 env_value,
                 clean_str(client_id, ""),
                 clean_str(client_secret, ""),
-                clean_str(refresh_token, ""),
                 clean_str(ru_name, ""),
             ),
         )

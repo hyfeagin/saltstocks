@@ -50,17 +50,27 @@
         <input id="ebay-ru-name" name="ru_name" value="{{ ebay_settings.ru_name }}" placeholder="YourName-AppName-PRD-xxxxxxxx-xxxxxxxx" />
         <div class="muted">Register <code>http://localhost:8000/ebay/oauth/callback</code> as a redirect URI in your eBay app, then paste the generated RuName here.</div>
       </div>
-      <div style="grid-column: 1 / span 2;">
-        <label>Refresh Token <span class="muted">(auto-filled after connecting below, or paste manually)</span></label>
-        <textarea id="ebay-refresh-token" name="refresh_token" rows="4" placeholder="Long-lived refresh token from eBay auth code flow">{{ ebay_settings.refresh_token }}</textarea>
-      </div>
     </div>
     <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
       <button class="btn btn-primary" type="submit">Save eBay Settings</button>
-      <a href="/ebay/oauth/start" class="btn" style="text-decoration:none;">Connect to eBay (Get New Token)</a>
     </div>
   </form>
-  <p class="muted">Each environment keeps its own credentials. Switching the dropdown loads that environment's saved values. Save your Client ID, Client Secret, and RuName first, then click <b>Connect to eBay</b> to authorize and get a fresh refresh token.</p>
+
+  <div style="margin-top:16px; padding:12px; background:var(--bg-subtle, #f6f6f6); border-radius:6px; display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+    <div>
+      {% if ebay_settings.refresh_token %}
+        <span style="color:green; font-weight:600;">&#10003; Connected</span>
+        {% if ebay_settings.updated_at %}
+          <span class="muted"> — token last refreshed {{ ebay_settings.updated_at[:10] }}</span>
+        {% endif %}
+      {% else %}
+        <span style="color:#c0392b; font-weight:600;">&#10007; Not connected</span>
+        <span class="muted"> — click Connect to authorize</span>
+      {% endif %}
+    </div>
+    <a href="/ebay/oauth/start" class="btn btn-primary" style="text-decoration:none;">Connect to eBay</a>
+  </div>
+  <p class="muted" style="margin-top:8px;">Each environment keeps its own credentials. Save your Client ID, Client Secret, and RuName first, then click <b>Connect to eBay</b>. You'll be redirected to eBay to authorize, then automatically redirected back.</p>
 </div>
 
 <div class="card">
@@ -200,14 +210,12 @@
     const envSelect = document.getElementById("ebay-environment");
     const clientId = document.getElementById("ebay-client-id");
     const clientSecret = document.getElementById("ebay-client-secret");
-    const refreshToken = document.getElementById("ebay-refresh-token");
     const ruName = document.getElementById("ebay-ru-name");
 
     function applyProfile(env) {
       const profile = profiles[env] || {};
       clientId.value = profile.client_id || "";
       clientSecret.value = profile.client_secret || "";
-      refreshToken.value = profile.refresh_token || "";
       ruName.value = profile.ru_name || "";
     }
 

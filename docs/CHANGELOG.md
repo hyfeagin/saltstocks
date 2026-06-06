@@ -4,6 +4,54 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [2.4.0] — 2026-06-05
+
+### Added — Materials & Production Tracking
+
+- New `/materials` module for managing raw material inventory separately from resale inventory.
+- **Materials stock list** — qty on hand, unit cost, total value, low-stock badge when qty ≤ reorder point, inline ±qty adjust form.
+- **Add / Edit material** (`/materials/new`, `/materials/{id}/edit`) — name, unit (lbs, oz, g, kg, each, fl oz, ml, L), reorder point, notes.
+  - **"Total paid" field** — enter the invoice total and starting qty; unit cost is auto-calculated (`total_paid ÷ qty`) with an "auto" badge. The unit cost field remains editable for direct entry.
+- **Recipes** (`/materials/recipes`, `/materials/recipes/new`, `/materials/recipes/{id}/edit`) — define ingredient lists with qty per batch; live batch-cost and cost-per-unit calculator updates as you type.
+- **Production runs** (`/materials/produce`) — select a recipe or build an ad-hoc run, enter batch count, choose or create a finished-goods inventory item; all material qtys and inventory are updated atomically.
+- **Accounting integration for production runs** — each run posts a reclassification journal entry (DR 1200 finished goods / CR 1200 × N materials) via `PRODUCTION_RUN` system template so total inventory asset value is preserved.
+- **`BUY_MATERIALS` / `BUY_MATERIALS_PERSONAL` transaction templates** — purchasing materials creates a journal entry (DR 1200 Inventory / CR payment account or owner contributions) and updates `item_type='material'` inventory via the same questionnaire flow used for resale purchases.
+- Database migration: `reorder_point` column on `items`; new tables `recipes`, `recipe_lines`, `production_runs`, `production_run_materials`.
+- Seeded starter material SKUs: BAKSOD, SLSA, BSALT, COLORANT, PKG.
+- Materials nav link added to global navigation bar.
+- `PRODUCTION_RUN` added to `_SYSTEM_TEMPLATES` so it never appears in the user-facing transaction chooser.
+
+---
+
+## [2.3.0] — 2026-06-05
+
+### Added — eBay Sale: Integrated Order Entry (Inventory + Accounting in One Step)
+
+- New `SELL_INVENTORY_EBAY` transaction template — records a complete eBay sale (inventory deduction + revenue + fees) as a single atomic operation instead of three separate entries.
+- Questionnaire flow for `SELL_INVENTORY_EBAY`:
+  1. **Which item sold** — inventory picker (only shows items with qty > 0)
+  2. **Item sale price** — what the buyer paid for the item
+  3. **Buyer shipping charged** — shipping the buyer paid (0 for free shipping); optional, defaults to $0
+  4. **eBay fees** — total final value fee and other eBay charges; optional, defaults to $0
+  5. **Payment account** — PayPal or bank where the net deposit lands
+  6. Date, vendor, memo, receipt upload
+- Journal entry generated (all in one transaction):
+
+  | | Account | Amount |
+  |---|---|---|
+  | DR | Payment account (PayPal/Bank) | item price + shipping − eBay fees |
+  | DR | eBay Fees expense (6060) | eBay fees |
+  | CR | Sales Revenue (4000) | item price + shipping (gross) |
+  | DR | COGS (5000) | unit cost × qty sold |
+  | CR | Inventory (1200) | unit cost × qty sold |
+
+- Inventory `qty_on_hand` decremented and lot `qty_remaining` updated atomically with journal posting — same mechanism as `SELL_INVENTORY_CASH`.
+- Plain-English confirm summary: *"You recorded an eBay sale of Widget #1: $45.00 item price + $5.00 buyer shipping = $50.00 gross − $7.50 eBay fees = $42.50 net deposit."*
+- `TransactionAnswerSet` gains two new optional fields: `ebay_fees_amount` and `ebay_shipping_charged`.
+- `resolve_lines()` in `catalog.py` accepts the new fields and builds the correct multi-debit entry for `SELL_INVENTORY_EBAY`.
+
+---
+
 ## [2.2.0] — 2026-05-08
 
 ### Added — Split Purchase Flow (Mixed Inventory + Expense on One Receipt)

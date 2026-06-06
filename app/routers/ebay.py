@@ -222,6 +222,54 @@ def ebay_oauth_exchange(
         )
 
     return RedirectResponse("/config?saved_ebay=1&oauth=1#ebay-settings", status_code=303)
+
+
+@router.get("/ebay/oauth/callback", response_class=HTMLResponse)
+def ebay_oauth_callback(
+    request: Request,
+    code: str = "",
+    error: str = "",
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Automatic OAuth2 callback — eBay redirects here after the user authorizes."""
+    if error:
+        return render("ebay_oauth_error.html", request,
+            error_message=f"eBay authorization was denied: {error}", environment="")
+
+    code = (code or "").strip()
+    if not code:
+        return render("ebay_oauth_error.html", request,
+            error_message="No authorization code in the redirect URL. Try connecting again.", environment="")
+
+    ebay_bundle = get_ebay_profile_bundle(conn)
+    profile = ebay_bundle["active_profile"]
+    env = ebay_bundle["active_environment"]
+    ru_name = (profile.get("ru_name") or "").strip()
+
+    settings = EbaySettings(
+        client_id=profile["client_id"] or "",
+        client_secret=profile["client_secret"] or "",
+        environment=env,
+        refresh_token="",
+    )
+    try:
+        _, refresh_token = exchange_code_for_tokens(settings, ru_name, code)
+    except EbayIntegrationError as exc:
+        return render("ebay_oauth_error.html", request, error_message=str(exc), environment=env)
+
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO ebay_credentials (environment, client_id, client_secret, refresh_token, ru_name, updated_at)
+            VALUES (?, ?, ?, ?, ?, datetime('now'))
+            ON CONFLICT(environment) DO UPDATE SET
+              refresh_token=excluded.refresh_token,
+              updated_at=datetime('now')
+            """,
+            (env, profile["client_id"] or "", profile["client_secret"] or "", refresh_token, ru_name),
+        )
+
+    return RedirectResponse("/config?saved_ebay=1&oauth=1#ebay-settings", status_code=303)
 # =========================
 # ANCHOR: EBAY_OAUTH_END
 # =========================

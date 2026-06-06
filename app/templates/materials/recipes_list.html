@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .mat-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+  .mat-header h1 { margin:0; }
+  .btn { padding:.4rem .9rem; border-radius:4px; text-decoration:none; font-size:.9rem; cursor:pointer; border:none; }
+  .btn-primary { background:var(--ss-accent); color:#fff; }
+  .btn-ghost { background:transparent; border:1px solid var(--ss-accent); color:var(--ss-accent); }
+  .btn-sm { padding:.25rem .6rem; font-size:.8rem; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th { text-align:left; border-bottom:2px solid #ddd; padding:.4rem .5rem; color:#555; }
+  td { padding:.45rem .5rem; border-bottom:1px solid #eee; vertical-align:middle; }
+  tr:hover td { background:#f9f9f9; }
+  .empty-note { color:#888; font-style:italic; margin:.5rem 0; }
+</style>
+
+<div class="mat-header">
+  <h1>Recipes</h1>
+  <div style="display:flex;gap:.5rem;">
+    <a class="btn btn-ghost" href="/materials">← Materials</a>
+    <a class="btn btn-primary" href="/materials/recipes/new">+ New Recipe</a>
+  </div>
+</div>
+
+{% if recipes %}
+<table>
+  <thead>
+    <tr>
+      <th>Recipe Name</th>
+      <th>Yield per Batch</th>
+      <th>Ingredients</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in recipes %}
+    <tr>
+      <td><strong>{{ r.name }}</strong>{% if not r.is_active %} <span style="color:#999;font-size:.8rem;">(inactive)</span>{% endif %}</td>
+      <td>{{ r.yield_qty }} {{ r.yield_unit }}</td>
+      <td>{{ r.line_count }} ingredient{{ 's' if r.line_count != 1 else '' }}</td>
+      <td style="display:flex;gap:.4rem;">
+        <a class="btn btn-ghost btn-sm" href="/materials/recipes/{{ r.id }}">Edit</a>
+        <a class="btn btn-primary btn-sm" href="/materials/produce?recipe_id={{ r.id }}">Produce</a>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty-note">No recipes yet. <a href="/materials/recipes/new">Create your first recipe.</a></p>
+{% endif %}
+{% endblock %}

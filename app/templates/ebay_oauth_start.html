@@ -4,22 +4,21 @@
 <p class="muted">Environment: <strong>{{ environment }}</strong></p>
 
 <div class="card">
-  <h3>Step 1 — Authorize</h3>
-  <p>Click the link below to open eBay's authorization page. Sign in with your eBay seller account and click <b>Agree</b>.</p>
-  <a href="{{ auth_url }}" target="_blank" class="btn btn-primary" style="text-decoration:none;">Open eBay Authorization Page</a>
+  <h3>Authorize access</h3>
+  <p>Click the button below to open eBay's authorization page. Sign in with your eBay seller account and click <b>Agree</b>.</p>
+  <p>After you approve access, eBay will redirect your browser back to this app automatically and save your token — no copy-pasting needed.</p>
+  <a href="{{ auth_url }}" class="btn btn-primary" style="text-decoration:none;">Open eBay Authorization Page</a>
+  <a href="/config#ebay-settings" class="btn" style="text-decoration:none; margin-left:8px;">Cancel</a>
 </div>
 
 <div class="card" style="margin-top:16px;">
-  <h3>Step 2 — Paste the redirect URL</h3>
-  <p>After you authorize, your browser will try to redirect to <code>https://localhost:8000/...</code> and show a <b>connection error</b> — that's expected.</p>
-  <p>When that happens, <b>copy the full URL from your browser's address bar</b> and paste it below. The URL should contain <code>?code=</code> in it.</p>
-  <p class="muted">Tip: the URL may look garbled or cut off in the address bar — copy it anyway, the app will extract the code correctly.</p>
+  <h3>Didn't get redirected back?</h3>
+  <p>If your browser showed a connection error instead of returning here, copy the full URL from the address bar and paste it below. The URL should contain <code>?code=</code> in it.</p>
   <form method="post" action="/ebay/oauth/exchange">
-    <label>Redirect URL (paste the full URL from the address bar)</label>
-    <textarea name="redirect_url" rows="4" placeholder="https://localhost:8000/ebay/oauth/callback?code=v%5E1.1%23i%5E1%23r%5E1..." style="width:100%; font-family:monospace; font-size:0.85em;"></textarea>
+    <label>Redirect URL (fallback — paste the full URL from the address bar)</label>
+    <textarea name="redirect_url" rows="3" placeholder="https://localhost:8000/ebay/oauth/callback?code=v%5E1.1%23i%5E1%23r%5E1..." style="width:100%; font-family:monospace; font-size:0.85em;"></textarea>
     <div style="margin-top:10px;">
-      <button class="btn btn-primary" type="submit">Exchange Code &amp; Save Token</button>
-      <a href="/config#ebay-settings" class="btn" style="text-decoration:none; margin-left:8px;">Cancel</a>
+      <button class="btn" type="submit">Exchange Code &amp; Save Token</button>
     </div>
   </form>
 </div>

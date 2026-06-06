@@ -669,8 +669,6 @@ def _resolve_inventory_purchase_context(
         ).fetchone()
         if row is None:
             raise ValueError(f"Inventory item {item_id} not found.")
-        if row["item_type"] != "resale":
-            raise ValueError("Inventory purchases can only be recorded against resale items.")
 
         current_qty = Decimal(str(row["qty_on_hand"] or 0)).quantize(Decimal("0.0001"))
         current_cost = Decimal(str(row["unit_cost"] or 0)).quantize(Decimal("0.0001"))
@@ -724,11 +722,11 @@ def _build_split_purchase_lines(
             memo=split.memo or tas.memo,
         ))
 
-    if tas.template_id == "BUY_INVENTORY_PERSONAL":
+    if tas.template_id in ("BUY_INVENTORY_PERSONAL", "BUY_MATERIALS_PERSONAL"):
         credit_id = account_map["3100"]
     else:
         if tas.payment_account_id is None:
-            raise ValueError("BUY_INVENTORY requires a payment account.")
+            raise ValueError("This template requires a payment account.")
         credit_id = tas.payment_account_id
 
     lines.append(JournalLineInput(
@@ -1683,7 +1681,7 @@ def _prefill_session_from_nlp(session: QuestionnaireSession, result: NLPResult) 
         result.is_split_purchase
         and result.expense_splits
         and conf.get("expense_splits", 0) >= CONFIDENCE_THRESHOLD
-        and template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")
+        and template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL")
     ):
         session.answers["has_expense_splits"] = "yes"
         session.history.append("has_expense_splits")
@@ -1942,11 +1940,20 @@ def entry_step(
                 ORDER BY name
                 """
             ).fetchall()
+        elif step.id == "inventory_link_material":
+            inventory_items = conn.execute(
+                """
+                SELECT id, sku, name, notes, company, category, brand, tags, location, condition
+                FROM items
+                WHERE item_type='material'
+                ORDER BY name
+                """
+            ).fetchall()
         else:
             inventory_items = conn.execute(
                 """
                 SELECT id, sku, name, notes, company, category, brand, tags, location, condition
-                FROM items ORDER BY name
+                FROM items WHERE item_type='resale' ORDER BY name
                 """
             ).fetchall()
 
@@ -2125,6 +2132,30 @@ def _build_summary_text(
         paid = f"your {payment_account_name}" if payment_account_name else "a business account"
         return f"You bought{items_part} for {cost_part}{vendor_part} using {paid}."
 
+    if tid in ("BUY_MATERIALS", "BUY_MATERIALS_PERSONAL"):
+        freight = tas.freight_in_amount or Decimal("0")
+        ptax = tas.purchase_tax_amount or Decimal("0")
+        overhead = freight + ptax
+        n_items = len(purchase_items) if purchase_items else 0
+        items_part = f" {n_items} material{'s' if n_items != 1 else ''}" if n_items else ""
+        if overhead > 0:
+            mat_cost = tas.total_amount - overhead - sum(s.amount for s in tas.expense_splits)
+            extras = []
+            if freight > 0:
+                extras.append(f"${freight:.2f} shipping")
+            if ptax > 0:
+                extras.append(f"${ptax:.2f} tax")
+            cost_part = f"${mat_cost:.2f} + {' + '.join(extras)} = {amt} total"
+        else:
+            cost_part = amt
+        if tid == "BUY_MATERIALS_PERSONAL":
+            return (
+                f"You bought{items_part} for {cost_part}{vendor_part} using personal funds. "
+                f"The business owes you {amt} back."
+            )
+        paid = f"your {payment_account_name}" if payment_account_name else "a business account"
+        return f"You bought{items_part} for {cost_part}{vendor_part} using {paid}."
+
     if tid == "SELL_INVENTORY_CASH":
         tax = tas.sales_tax_amount or Decimal("0")
         items_part = f" of {inventory_item_name}" if inventory_item_name else ""
@@ -2230,7 +2261,7 @@ def entry_preview_get(
             )
 
     inventory_purchase_ctx: list[dict] = []
-    if tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"):
+    if tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL"):
         try:
             inventory_purchase_ctx = _resolve_inventory_purchase_context(conn, tas)
         except ValueError as exc:
@@ -2249,7 +2280,7 @@ def entry_preview_get(
 
     try:
         is_split_purchase = (
-            tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")
+            tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL")
             and bool(tas.expense_splits)
         )
         if is_split_purchase:
@@ -2441,27 +2472,30 @@ def _insert_new_inventory_purchase_item(
     name: str,
     quantity: int,
     unit_cost: Decimal,
+    item_type: str = "resale",
 ) -> int:
-    """Create a resale inventory item with a generated SKU for accounting purchases."""
-    sku = get_next_sku(tx_conn, _DEFAULT_NEW_RESALE_COMPANY, _DEFAULT_NEW_RESALE_CODE)
+    """Create an inventory item with a generated SKU for accounting purchases."""
     column_names = {
         row["name"]
         for row in tx_conn.execute("PRAGMA table_info(items)").fetchall()
     }
 
     values: dict[str, object] = {
-        "item_type": "resale",
-        "sku": sku,
+        "item_type": item_type,
         "name": name,
         "qty_on_hand": quantity,
         "unit_cost": float(unit_cost),
     }
-    optional_values = {
-        "company": _DEFAULT_NEW_RESALE_COMPANY,
-        "brand_code": _DEFAULT_NEW_RESALE_CODE,
-        "category": "Collectibles",
-        "unit": "each",
-    }
+    optional_values: dict[str, object] = {"unit": "each"}
+    if item_type == "resale":
+        sku = get_next_sku(tx_conn, _DEFAULT_NEW_RESALE_COMPANY, _DEFAULT_NEW_RESALE_CODE)
+        values["sku"] = sku
+        optional_values = {
+            "company": _DEFAULT_NEW_RESALE_COMPANY,
+            "brand_code": _DEFAULT_NEW_RESALE_CODE,
+            "category": "Collectibles",
+            "unit": "each",
+        }
     for key, value in optional_values.items():
         if key in column_names:
             values[key] = value
@@ -2559,6 +2593,7 @@ def _apply_inventory_purchase(
     purchase_ctx: list[dict],
 ) -> None:
     """Insert or update all non-lot purchased inventory items before posting the entry."""
+    new_item_type = "material" if req.template_id in ("BUY_MATERIALS", "BUY_MATERIALS_PERSONAL") else "resale"
     for ctx in purchase_ctx:
         if ctx.get("is_lot"):
             continue  # lots are created in after_insert once the entry_id exists
@@ -2568,13 +2603,14 @@ def _apply_inventory_purchase(
                 name=ctx["item_name"],
                 quantity=ctx["quantity"],
                 unit_cost=ctx["allocated_unit_cost"],
+                item_type=new_item_type,
             )
         else:
             tx_conn.execute(
                 """
                 UPDATE items
                 SET qty_on_hand=?, unit_cost=?
-                WHERE id=? AND item_type='resale'
+                WHERE id=?
                 """,
                 (
                     float(ctx["new_qty"]),
@@ -2630,7 +2666,7 @@ def entry_confirm(
             )
 
     inventory_purchase_ctx: list[dict] = []
-    if tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"):
+    if tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL"):
         try:
             inventory_purchase_ctx = _resolve_inventory_purchase_context(conn, tas)
         except ValueError as exc:
@@ -2662,7 +2698,7 @@ def entry_confirm(
 
     try:
         is_split_purchase = (
-            tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL")
+            tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL")
             and bool(tas.expense_splits)
         )
         if is_split_purchase:
@@ -2750,7 +2786,7 @@ def entry_confirm(
                 )
 
             entry_id = post_entries(conn, [req, cogs_req], after_insert=_after_sale_insert)[0]
-        elif tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL") and inventory_purchase_ctx is not None:
+        elif tas.template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL") and inventory_purchase_ctx is not None:
             lot_ctxs = [c for c in inventory_purchase_ctx if c.get("is_lot")]
 
             def _before_inventory_insert(tx_conn: sqlite3.Connection) -> None:

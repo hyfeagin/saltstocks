@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .form-card { max-width:520px; }
+  .form-group { margin-bottom:1rem; }
+  label { display:block; font-weight:500; margin-bottom:.3rem; font-size:.9rem; }
+  input[type=text], input[type=number], select, textarea {
+    width:100%; padding:.4rem .6rem; border:1px solid #ccc; border-radius:4px;
+    font-size:.95rem; box-sizing:border-box;
+  }
+  textarea { min-height:70px; resize:vertical; }
+  .hint { font-size:.8rem; color:#888; margin-top:.2rem; }
+  .btn { padding:.45rem 1.1rem; border-radius:4px; font-size:.9rem; cursor:pointer; border:none; }
+  .btn-primary { background:var(--ss-accent); color:#fff; }
+  .btn-ghost { background:transparent; border:1px solid #ccc; color:#333; text-decoration:none; }
+  .error-msg { background:#fdecea; border:1px solid #f5c2c7; color:#842029; padding:.5rem .8rem; border-radius:4px; margin-bottom:1rem; }
+  .form-row { display:flex; gap:.75rem; }
+  .form-row .form-group { flex:1; }
+</style>
+
+<h1>{{ "Edit" if item else "Add" }} Material</h1>
+
+{% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+
+<div class="form-card">
+<form method="post" action="{{ '/materials/' ~ item.id ~ '/edit' if item else '/materials/new' }}">
+  <div class="form-group">
+    <label for="name">Name *</label>
+    <input id="name" name="name" type="text" value="{{ item.name if item else '' }}" placeholder="e.g. Epsom Salt" required>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="unit">Unit *</label>
+      <select id="unit" name="unit">
+        {% for u in units %}
+        <option value="{{ u }}" {{ 'selected' if item and item.unit == u else '' }}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if not item %}
+    <div class="form-group">
+      <label for="qty_on_hand">Starting Qty on Hand</label>
+      <input id="qty_on_hand" name="qty_on_hand" type="number" step="0.01" min="0" value="0"
+             oninput="computeUnitCost()">
+      <div class="hint">You can adjust qty later from the materials list.</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="total_paid">Total paid ($)</label>
+      <input id="total_paid" name="total_paid" type="number" step="0.01" min="0"
+             placeholder="e.g. 87.00" oninput="computeUnitCost()">
+      <div class="hint">Enter what you paid in total; unit cost is calculated automatically.</div>
+    </div>
+    {% if item %}
+    <div class="form-group">
+      <label for="ref_qty">For qty</label>
+      <input id="ref_qty" type="number" step="0.01" min="0.0001"
+             placeholder="e.g. 50" oninput="computeUnitCost()">
+      <div class="hint">How many {{ item.unit or 'units' }} did that cover?</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="form-row" style="align-items:flex-end;">
+    <div class="form-group" style="flex:1">
+      <label for="unit_cost">Cost per Unit ($) <span id="unit-cost-badge" style="display:none;font-size:.75rem;background:rgba(47,143,115,.12);color:var(--ss-accent);border-radius:4px;padding:1px 6px;font-weight:600;">auto</span></label>
+      <input id="unit_cost" name="unit_cost" type="number" step="0.0001" min="0"
+             value="{{ '%.4f'|format(item.unit_cost) if item else '0.0000' }}"
+             oninput="clearAuto()">
+    </div>
+  </div>
+
+<script>
+var _autoCost = false;
+
+function computeUnitCost() {
+  var totalPaid = parseFloat(document.getElementById('total_paid').value);
+  var refQtyEl  = document.getElementById('ref_qty');
+  var qtyEl     = document.getElementById('qty_on_hand') || refQtyEl;
+  var qty       = qtyEl ? parseFloat(qtyEl.value) : NaN;
+  var unitCostEl = document.getElementById('unit_cost');
+  var badge      = document.getElementById('unit-cost-badge');
+
+  if (totalPaid > 0 && qty > 0) {
+    unitCostEl.value = (totalPaid / qty).toFixed(4);
+    _autoCost = true;
+    badge.style.display = '';
+  } else {
+    if (_autoCost) { unitCostEl.value = ''; }
+    badge.style.display = 'none';
+  }
+}
+
+function clearAuto() {
+  _autoCost = false;
+  document.getElementById('unit-cost-badge').style.display = 'none';
+}
+</script>
+
+  <div class="form-group">
+    <label for="reorder_point">Reorder Point (optional)</label>
+    <input id="reorder_point" name="reorder_point" type="number" step="0.01" min="0"
+           value="{{ '%.2f'|format(item.reorder_point) if item and item.reorder_point is not none else '' }}"
+           placeholder="e.g. 32">
+    <div class="hint">Show "Low stock" warning when qty drops at or below this amount.</div>
+  </div>
+
+  <div class="form-group">
+    <label for="notes">Notes (optional)</label>
+    <textarea id="notes" name="notes">{{ item.notes if item and item.notes else '' }}</textarea>
+  </div>
+
+  <div style="display:flex;gap:.6rem;margin-top:1.5rem;">
+    <button class="btn btn-primary" type="submit">Save</button>
+    <a class="btn btn-ghost" href="/materials">Cancel</a>
+  </div>
+</form>
+</div>
+{% endblock %}

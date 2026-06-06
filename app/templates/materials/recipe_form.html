@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .form-card { max-width:680px; }
+  .form-group { margin-bottom:1rem; }
+  label { display:block; font-weight:500; margin-bottom:.3rem; font-size:.9rem; }
+  input[type=text], input[type=number], select, textarea {
+    width:100%; padding:.4rem .6rem; border:1px solid #ccc; border-radius:4px;
+    font-size:.95rem; box-sizing:border-box;
+  }
+  textarea { min-height:60px; resize:vertical; }
+  .hint { font-size:.8rem; color:#888; margin-top:.2rem; }
+  .btn { padding:.4rem .9rem; border-radius:4px; font-size:.9rem; cursor:pointer; border:none; text-decoration:none; display:inline-block; }
+  .btn-primary { background:var(--ss-accent); color:#fff; }
+  .btn-ghost { background:transparent; border:1px solid #ccc; color:#333; }
+  .btn-danger { background:#dc3545; color:#fff; }
+  .btn-sm { padding:.25rem .6rem; font-size:.8rem; }
+  .error-msg { background:#fdecea; border:1px solid #f5c2c7; color:#842029; padding:.5rem .8rem; border-radius:4px; margin-bottom:1rem; }
+  .form-row { display:flex; gap:.75rem; }
+  .form-row .form-group { flex:1; }
+
+  /* Ingredient table */
+  .ing-table { width:100%; border-collapse:collapse; font-size:.9rem; margin-bottom:.5rem; }
+  .ing-table th { text-align:left; border-bottom:2px solid #ddd; padding:.35rem .4rem; color:#555; font-weight:600; }
+  .ing-table td { padding:.3rem .4rem; border-bottom:1px solid #eee; vertical-align:middle; }
+  .ing-table select, .ing-table input { font-size:.88rem; padding:.25rem .4rem; }
+  .cost-preview { background:#f0f4f8; border-radius:6px; padding:.75rem 1rem; margin:1rem 0; font-size:.9rem; }
+  .cost-preview strong { font-size:1rem; }
+</style>
+
+<h1>{{ "Edit Recipe: " ~ recipe.name if recipe else "New Recipe" }}</h1>
+{% if error %}<div class="error-msg">{{ error }}</div>{% endif %}
+
+<div class="form-card">
+<form method="post" action="{{ '/materials/recipes/' ~ recipe.id if recipe else '/materials/recipes/new' }}" id="recipe-form">
+
+  <div class="form-group">
+    <label for="name">Recipe Name *</label>
+    <input id="name" name="name" type="text" value="{{ recipe.name if recipe else '' }}" placeholder="e.g. Bath Bombs 4 oz" required>
+  </div>
+
+  <div class="form-group">
+    <label for="description">Description (optional)</label>
+    <textarea id="description" name="description">{{ recipe.description if recipe and recipe.description else '' }}</textarea>
+  </div>
+
+  <div class="form-row">
+    <div class="form-group">
+      <label for="yield_qty">Yield per Batch *</label>
+      <input id="yield_qty" name="yield_qty" type="number" step="0.01" min="0.01"
+             value="{{ recipe.yield_qty if recipe else '1' }}" required>
+    </div>
+    <div class="form-group">
+      <label for="yield_unit">Yield Unit</label>
+      <select id="yield_unit" name="yield_unit">
+        {% for u in units %}
+        <option value="{{ u }}" {{ 'selected' if recipe and recipe.yield_unit == u else '' }}>{{ u }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <!-- Ingredients -->
+  <div class="form-group">
+    <label>Ingredients</label>
+    <div class="hint" style="margin-bottom:.5rem;">Enter qty needed per single batch. Multiply by batches when producing.</div>
+    <table class="ing-table" id="ing-table">
+      <thead>
+        <tr>
+          <th>Material</th>
+          <th>Qty per Batch</th>
+          <th>Cost / unit</th>
+          <th>Line cost</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="ing-tbody">
+        {% if lines %}
+          {% for ln in lines %}
+          <tr class="ing-row">
+            <td>
+              <select name="material_ids" class="mat-select" onchange="updateLineCost(this)">
+                <option value="">— choose —</option>
+                {% for m in materials %}
+                <option value="{{ m.id }}"
+                        data-cost="{{ '%.4f'|format(m.unit_cost) }}"
+                        data-unit="{{ m.unit }}"
+                        {{ 'selected' if m.id == ln.material_id else '' }}>
+                  {{ m.name }} ({{ m.unit }})
+                </option>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input type="number" name="qty_per_batches" step="0.001" min="0.001" value="{{ ln.qty_per_batch }}" class="qty-input" onchange="updateLineCost(this)" style="width:6rem;"></td>
+            <td class="unit-cost-cell">${{ '%.4f'|format(ln.unit_cost) }}</td>
+            <td class="line-cost-cell">${{ '%.2f'|format(ln.unit_cost * ln.qty_per_batch) }}</td>
+            <td><button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)">✕</button></td>
+          </tr>
+          {% endfor %}
+        {% endif %}
+      </tbody>
+    </table>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="addRow()">+ Add ingredient</button>
+  </div>
+
+  <div class="cost-preview" id="cost-preview">
+    Batch cost: <strong id="batch-cost">$0.00</strong>
+    &nbsp;·&nbsp;
+    Cost per unit: <strong id="per-unit-cost">$0.00</strong>
+  </div>
+
+  <div class="form-group">
+    <label for="notes">Notes (optional)</label>
+    <textarea id="notes" name="notes">{{ recipe.notes if recipe and recipe.notes else '' }}</textarea>
+  </div>
+
+  <div style="display:flex;gap:.6rem;margin-top:1.5rem;">
+    <button class="btn btn-primary" type="submit">Save Recipe</button>
+    <a class="btn btn-ghost" href="/materials/recipes">Cancel</a>
+    {% if recipe %}
+    <a class="btn btn-ghost" href="/materials/produce?recipe_id={{ recipe.id }}" style="margin-left:auto;">
+      Produce →
+    </a>
+    {% endif %}
+  </div>
+</form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const MATERIALS = [
+  {% for m in materials %}
+  { id: {{ m.id }}, name: {{ m.name|tojson }}, unit: {{ m.unit|tojson }}, cost: {{ '%.4f'|format(m.unit_cost) }} },
+  {% endfor %}
+];
+
+function materialOptionsHTML(selectedId) {
+  let html = '<option value="">— choose —</option>';
+  for (const m of MATERIALS) {
+    const sel = m.id === selectedId ? ' selected' : '';
+    html += `<option value="${m.id}" data-cost="${m.cost}" data-unit="${m.unit}"${sel}>${m.name} (${m.unit})</option>`;
+  }
+  return html;
+}
+
+function addRow() {
+  const tbody = document.getElementById('ing-tbody');
+  const tr = document.createElement('tr');
+  tr.className = 'ing-row';
+  tr.innerHTML = `
+    <td><select name="material_ids" class="mat-select" onchange="updateLineCost(this)">
+      ${materialOptionsHTML(null)}
+    </select></td>
+    <td><input type="number" name="qty_per_batches" step="0.001" min="0.001" value="1"
+               class="qty-input" onchange="updateLineCost(this)" style="width:6rem;"></td>
+    <td class="unit-cost-cell">$0.0000</td>
+    <td class="line-cost-cell">$0.00</td>
+    <td><button type="button" class="btn btn-danger btn-sm" onclick="removeRow(this)">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+function removeRow(btn) {
+  btn.closest('tr').remove();
+  updateBatchCost();
+}
+
+function updateLineCost(el) {
+  const row = el.closest('tr');
+  const sel = row.querySelector('.mat-select');
+  const opt = sel.options[sel.selectedIndex];
+  const cost = parseFloat(opt.dataset.cost || 0);
+  const qty  = parseFloat(row.querySelector('.qty-input').value || 0);
+  row.querySelector('.unit-cost-cell').textContent = '$' + cost.toFixed(4);
+  row.querySelector('.line-cost-cell').textContent = '$' + (cost * qty).toFixed(2);
+  updateBatchCost();
+}
+
+function updateBatchCost() {
+  let total = 0;
+  document.querySelectorAll('.ing-row').forEach(row => {
+    const sel  = row.querySelector('.mat-select');
+    const opt  = sel.options[sel.selectedIndex];
+    const cost = parseFloat(opt ? (opt.dataset.cost || 0) : 0);
+    const qty  = parseFloat(row.querySelector('.qty-input').value || 0);
+    total += cost * qty;
+  });
+  const yieldQty = parseFloat(document.getElementById('yield_qty').value || 1);
+  document.getElementById('batch-cost').textContent = '$' + total.toFixed(2);
+  document.getElementById('per-unit-cost').textContent = '$' + (yieldQty > 0 ? (total / yieldQty).toFixed(4) : '0.0000');
+}
+
+document.getElementById('yield_qty').addEventListener('input', updateBatchCost);
+document.addEventListener('DOMContentLoaded', updateBatchCost);
+</script>
+{% endblock %}

@@ -43,8 +43,13 @@ _TEMPLATES_WITH_INVENTORY_LINK: frozenset[str] = frozenset(
     {"BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"}
 )
 
+# Material-purchase templates (same flow as inventory purchase but picks material items).
+_TEMPLATES_WITH_MATERIAL_LINK: frozenset[str] = frozenset(
+    {"BUY_MATERIALS", "BUY_MATERIALS_PERSONAL"}
+)
+
 _TEMPLATES_WITH_FREIGHT_IN: frozenset[str] = frozenset(
-    {"BUY_INVENTORY", "BUY_INVENTORY_PERSONAL"}
+    {"BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL"}
 )
 
 _TEMPLATES_WITH_SALES_TAX: frozenset[str] = frozenset({"SELL_INVENTORY_CASH"})
@@ -60,15 +65,19 @@ _TEMPLATES_SELL_INVENTORY: frozenset[str] = frozenset(
 # Funding-source derivation (used in build_answer_set).
 _FUNDING_SOURCE: dict[str, str] = {
     "BUY_INVENTORY_PERSONAL": "personal",
+    "BUY_MATERIALS_PERSONAL": "personal",
     "BUY_EXPENSE_PERSONAL": "personal",
     "BUY_INVENTORY": "business",
+    "BUY_MATERIALS": "business",
 }
 
-# COGS_RECOGNITION is posted automatically — never shown in the questionnaire.
+# System-only templates — never shown in the questionnaire chooser.
+_SYSTEM_TEMPLATES: frozenset[str] = frozenset({"COGS_RECOGNITION", "PRODUCTION_RUN"})
+
 _QUESTIONNAIRE_TEMPLATES: list[tuple[str, str]] = [
     (tid, t.name)
     for tid, t in sorted(CATALOG.items())
-    if tid != "COGS_RECOGNITION"
+    if tid not in _SYSTEM_TEMPLATES
 ]
 
 
@@ -178,6 +187,7 @@ GLOBAL_FLOW: list[Step] = [
 
     # ── 5. Total amount ──────────────────────────────────────────────────────
     # Skipped for BUY_INVENTORY / BUY_INVENTORY_PERSONAL — computed from line items.
+    # Skipped for BUY_MATERIALS / BUY_MATERIALS_PERSONAL — computed from line items.
     # Skipped for SELL_INVENTORY_EBAY — captured as ebay_total_amount above.
     Step(
         id="total_amount",
@@ -188,6 +198,7 @@ GLOBAL_FLOW: list[Step] = [
         shown_when=lambda a: (
             _a(a, "template_id") != "REIMBURSE_OWNER"
             and _a(a, "template_id") not in _TEMPLATES_WITH_INVENTORY_LINK
+            and _a(a, "template_id") not in _TEMPLATES_WITH_MATERIAL_LINK
             and _a(a, "template_id") != "SELL_INVENTORY_EBAY"
         ),
     ),
@@ -250,7 +261,7 @@ GLOBAL_FLOW: list[Step] = [
         ),
     ),
 
-    # ── 11. Inventory line items (purchase templates) ─────────────────────────
+    # ── 11. Inventory line items (resale purchase templates) ──────────────────
     # Multi-SKU: user adds rows with item + qty + unit cost each.
     # Answer is serialized as JSON array → maps to line_items on TransactionAnswerSet.
     Step(
@@ -260,6 +271,16 @@ GLOBAL_FLOW: list[Step] = [
         maps_to="line_items",
         help_text="Add each SKU you bought. Use '+ Add another item' for multi-SKU shipments.",
         shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK,
+    ),
+
+    # ── 11b. Material line items (material purchase templates) ────────────────
+    Step(
+        id="inventory_link_material",
+        question="What materials did you purchase?",
+        input_type="inventory_picker",
+        maps_to="line_items",
+        help_text="Add each material you bought. Use '+ Add another item' for multiple ingredients.",
+        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_MATERIAL_LINK,
     ),
 
     # ── 12. Freight-in ───────────────────────────────────────────────────────
@@ -289,14 +310,17 @@ GLOBAL_FLOW: list[Step] = [
     # ── 12c. Non-inventory expense splits ────────────────────────────────────
     Step(
         id="has_expense_splits",
-        question="Was anything else on this receipt NOT for resale inventory?",
+        question="Was anything else on this receipt that should be expensed separately?",
         input_type="multi_choice",
         maps_to="has_expense_splits",
         options=[
-            ("no", "No — everything on this receipt was inventory"),
+            ("no", "No — everything on this receipt goes to inventory"),
             ("yes", "Yes — I also bought supplies, tools, or other non-inventory items"),
         ],
-        shown_when=lambda a: _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK,
+        shown_when=lambda a: (
+            _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK
+            or _a(a, "template_id") in _TEMPLATES_WITH_MATERIAL_LINK
+        ),
     ),
     Step(
         id="expense_splits",
@@ -305,7 +329,10 @@ GLOBAL_FLOW: list[Step] = [
         maps_to="expense_splits",
         help_text="Check each expense category and enter the amount. The remaining total goes to inventory.",
         shown_when=lambda a: (
-            _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK
+            (
+                _a(a, "template_id") in _TEMPLATES_WITH_INVENTORY_LINK
+                or _a(a, "template_id") in _TEMPLATES_WITH_MATERIAL_LINK
+            )
             and _a(a, "has_expense_splits") == "yes"
         ),
     ),

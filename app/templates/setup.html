@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Create Password — Salt Stocks</title>
+  <link rel="stylesheet" href="/static/css/tokens.css" />
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center;
+           justify-content: center; background: var(--ss-bg); }
+    .login-card { width: 100%; max-width: 380px; padding: 32px;
+                  border: 1px solid var(--ss-border); border-radius: var(--ss-r-card);
+                  box-shadow: var(--ss-shadow-card); background: var(--ss-surface); }
+    h1 { margin: 0 0 6px; font-size: 1.4rem; }
+    .sub { color: var(--ss-muted); margin: 0 0 24px; font-size: 0.9rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 600;
+            color: var(--ss-muted); margin-bottom: 4px; margin-top: 14px; }
+    input[type="password"] { width: 100%; box-sizing: border-box; padding: 9px 12px;
+      border: 1px solid var(--ss-border); border-radius: var(--ss-r-input);
+      background: var(--ss-surface-input); color: var(--ss-text);
+      font-size: 1rem; font-family: inherit; }
+    input[type="password"]:focus { outline: 2px solid var(--ss-accent-glow);
+                                   border-color: var(--ss-accent); }
+    .btn-setup { width: 100%; margin-top: 20px; padding: 10px;
+                 background: var(--ss-accent); color: #f6fffb;
+                 border: none; border-radius: var(--ss-r-pill);
+                 font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; }
+    .btn-setup:hover { opacity: 0.9; }
+    .error { margin-top: 12px; padding: 10px 14px; border-radius: var(--ss-r-card);
+             background: var(--ss-danger-bg); border: 1px solid var(--ss-danger);
+             color: var(--ss-danger); font-size: 0.9rem; }
+    .hint { font-size: 0.8rem; color: var(--ss-muted); margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <h1>Salt Stocks</h1>
+    <p class="sub">Create a password to protect this app.</p>
+
+    <form method="post" action="/setup">
+      <label for="password">Password <span class="hint">(min 8 characters)</span></label>
+      <input type="password" id="password" name="password" autofocus autocomplete="new-password" />
+
+      <label for="confirm">Confirm password</label>
+      <input type="password" id="confirm" name="confirm" autocomplete="new-password" />
+
+      <button type="submit" class="btn-setup">Create Password</button>
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    </form>
+  </div>
+</body>
+</html>

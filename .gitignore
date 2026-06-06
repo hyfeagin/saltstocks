@@ -5,3 +5,5 @@ data/saltstocks.db
 data/backups/
 data/receipts/
 .DS_Store
+certs/*.pem
+data/.session_secret

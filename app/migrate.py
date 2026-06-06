@@ -467,6 +467,106 @@ def migrate():
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_items_lot ON items(lot_id)")
 
+        # ── Materials: reorder point on items ────────────────────────────────
+        ensure_column(conn, "items", "reorder_point", "reorder_point REAL")
+
+        # ── Recipes ──────────────────────────────────────────────────────────
+        if not table_exists(conn, "recipes"):
+            conn.execute("""
+            CREATE TABLE recipes (
+              id          INTEGER PRIMARY KEY AUTOINCREMENT,
+              name        TEXT NOT NULL,
+              description TEXT,
+              yield_qty   REAL NOT NULL DEFAULT 1,
+              yield_unit  TEXT NOT NULL DEFAULT 'each',
+              notes       TEXT,
+              is_active   INTEGER NOT NULL DEFAULT 1,
+              created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
+        if not table_exists(conn, "recipe_lines"):
+            conn.execute("""
+            CREATE TABLE recipe_lines (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              recipe_id     INTEGER NOT NULL REFERENCES recipes(id) ON DELETE CASCADE,
+              material_id   INTEGER NOT NULL REFERENCES items(id) ON DELETE RESTRICT,
+              qty_per_batch REAL NOT NULL,
+              notes         TEXT
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_recipe_lines_recipe ON recipe_lines(recipe_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_recipe_lines_material ON recipe_lines(material_id)"
+            )
+
+        # ── Production Runs ───────────────────────────────────────────────────
+        if not table_exists(conn, "production_runs"):
+            conn.execute("""
+            CREATE TABLE production_runs (
+              id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+              recipe_id          INTEGER REFERENCES recipes(id) ON DELETE SET NULL,
+              recipe_name        TEXT NOT NULL,
+              batches            REAL NOT NULL DEFAULT 1,
+              finished_item_id   INTEGER REFERENCES items(id) ON DELETE SET NULL,
+              finished_item_name TEXT,
+              finished_qty       REAL NOT NULL,
+              total_cogs         TEXT NOT NULL DEFAULT '0',
+              notes              TEXT,
+              run_date           TEXT NOT NULL,
+              created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_production_runs_recipe ON production_runs(recipe_id)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_production_runs_item ON production_runs(finished_item_id)"
+            )
+
+        if not table_exists(conn, "production_run_materials"):
+            conn.execute("""
+            CREATE TABLE production_run_materials (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id        INTEGER NOT NULL REFERENCES production_runs(id) ON DELETE CASCADE,
+              material_id   INTEGER REFERENCES items(id) ON DELETE SET NULL,
+              material_name TEXT NOT NULL,
+              qty_used      REAL NOT NULL,
+              unit          TEXT NOT NULL DEFAULT 'each',
+              unit_cost     TEXT NOT NULL DEFAULT '0',
+              total_cost    TEXT NOT NULL DEFAULT '0'
+            )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_prm_run ON production_run_materials(run_id)"
+            )
+
+        # Seed Umivera material codes
+        new_codes = [
+            ("BAKSOD", "Baking Soda", "material"),
+            ("SLSA",   "SLSA Powder", "material"),
+            ("BSALT",  "Bath Salt Base", "material"),
+            ("COLORANT", "Colorant/Mica", "material"),
+            ("PKG",    "Packaging/Supplies", "material"),
+        ]
+        for code, label, kind in new_codes:
+            conn.execute(
+                "INSERT OR IGNORE INTO codes(code, label, kind) VALUES (?,?,?)",
+                (code, label, kind),
+            )
+
+        # ── Auth ─────────────────────────────────────────────────────────────
+        if not table_exists(conn, "auth_config"):
+            conn.execute("""
+            CREATE TABLE auth_config (
+                id            INTEGER PRIMARY KEY,
+                password_hash TEXT
+            )
+            """)
+
     conn.close()
     print("Migration complete.")
 
