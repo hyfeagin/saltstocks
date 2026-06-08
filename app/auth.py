@@ -7,10 +7,9 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from passlib.context import CryptContext
+import bcrypt
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def get_session_secret() -> str:
@@ -26,11 +25,14 @@ def get_session_secret() -> str:
 
 
 def hash_password(password: str) -> str:
-    return _pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    try:
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False
 
 
 def get_password_hash(conn: sqlite3.Connection) -> Optional[str]:
@@ -55,8 +57,7 @@ def set_password_hash(conn: sqlite3.Connection, hashed: str) -> None:
 def macos_authenticate(reason: str = "access Salt Stocks") -> bool:
     """Prompt Touch ID (with Mac password fallback) via macOS LocalAuthentication.
 
-    Returns True if the user authenticated successfully, False if they cancelled
-    or the framework is unavailable (e.g. running on non-Mac / no biometrics).
+    Returns True if authenticated, False if cancelled or framework unavailable.
     """
     try:
         from LocalAuthentication import LAContext, LAPolicyDeviceOwnerAuthentication

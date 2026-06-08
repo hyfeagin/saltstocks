@@ -7,3 +7,4 @@ data/receipts/
 .DS_Store
 certs/*.pem
 data/.session_secret
+pull-db.sh
