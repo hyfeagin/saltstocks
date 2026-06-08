@@ -4,7 +4,7 @@ import sqlite3
 import unittest
 from decimal import Decimal
 
-from app.routers.ebay import _post_ebay_cogs_entry
+from app.routers.ebay import _post_ebay_cogs_entry, _post_ebay_revenue_entry
 
 
 def _conn() -> sqlite3.Connection:
@@ -42,8 +42,12 @@ def _conn() -> sqlite3.Connection:
     conn.executemany(
         "INSERT INTO accounts (id, code, name) VALUES (?, ?, ?)",
         [
-            (1, "1200", "Inventory"),
-            (2, "5000", "Cost of Goods Sold"),
+            (1, "1020", "Bank — Primary Checking"),
+            (2, "1200", "Inventory"),
+            (3, "4000", "Sales Revenue"),
+            (4, "5000", "Cost of Goods Sold"),
+            (5, "6050", "Shipping"),
+            (6, "6060", "Marketplace Fees"),
         ],
     )
     return conn
@@ -86,8 +90,8 @@ class EbayImportAccountingTests(unittest.TestCase):
             self.assertEqual(
                 [(line["account_id"], line["debit"], line["credit"], line["inventory_item_id"]) for line in lines],
                 [
-                    (2, "2.50", "0", 42),
-                    (1, "0", "2.50", 42),
+                    (4, "2.50", "0", 42),   # 5000 COGS debit
+                    (2, "0", "2.50", 42),   # 1200 Inventory credit
                 ],
             )
         finally:
@@ -111,6 +115,96 @@ class EbayImportAccountingTests(unittest.TestCase):
                 conn.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0],
                 0,
             )
+        finally:
+            conn.close()
+
+
+class EbayRevenueEntryTests(unittest.TestCase):
+    def test_post_ebay_revenue_entry_full(self) -> None:
+        """Revenue entry creates correct credit to 4000, debits to 6060/6050/1020."""
+        conn = _conn()
+        try:
+            entry_id = _post_ebay_revenue_entry(
+                conn,
+                order_id="ORDER-10",
+                line_item_id="LINE-10",
+                item_name="Sneakers",
+                sku="SHOE-001",
+                sale_price=Decimal("50.00"),
+                transaction_fees=Decimal("7.50"),
+                shipping_cost=Decimal("5.00"),
+            )
+            self.assertIsNotNone(entry_id)
+            entry = conn.execute(
+                "SELECT template_id, total_amount, created_by_method FROM journal_entries WHERE id=?",
+                (entry_id,),
+            ).fetchone()
+            self.assertEqual(entry["template_id"], "EBAY_SALE")
+            self.assertEqual(entry["total_amount"], "50.00")
+            self.assertEqual(entry["created_by_method"], "import_ebay")
+
+            lines = conn.execute(
+                "SELECT account_id, debit, credit, memo FROM journal_lines WHERE entry_id=? ORDER BY id",
+                (entry_id,),
+            ).fetchall()
+            # Revenue credit to 4000, fees debit to 6060, shipping debit to 6050, net payout debit to 1020
+            self.assertEqual(
+                [(ln["account_id"], ln["debit"], ln["credit"]) for ln in lines],
+                [
+                    (3, "0", "50.00"),   # 4000 Revenue credit
+                    (6, "7.50", "0"),    # 6060 Marketplace Fees debit
+                    (5, "5.00", "0"),    # 6050 Shipping debit
+                    (1, "37.50", "0"),   # 1020 Cash net payout debit (50 - 7.50 - 5.00)
+                ],
+            )
+        finally:
+            conn.close()
+
+    def test_post_ebay_revenue_entry_no_fees_no_shipping(self) -> None:
+        """Revenue entry with zero fees and shipping debits full amount to cash."""
+        conn = _conn()
+        try:
+            entry_id = _post_ebay_revenue_entry(
+                conn,
+                order_id="ORDER-11",
+                line_item_id="LINE-11",
+                item_name="Widget",
+                sku=None,
+                sale_price=Decimal("20.00"),
+                transaction_fees=Decimal("0"),
+                shipping_cost=Decimal("0"),
+            )
+            self.assertIsNotNone(entry_id)
+            lines = conn.execute(
+                "SELECT account_id, debit, credit FROM journal_lines WHERE entry_id=? ORDER BY id",
+                (entry_id,),
+            ).fetchall()
+            # Only revenue credit and net payout debit (no fee or shipping lines)
+            self.assertEqual(
+                [(ln["account_id"], ln["debit"], ln["credit"]) for ln in lines],
+                [
+                    (3, "0", "20.00"),   # 4000 Revenue credit
+                    (1, "20.00", "0"),   # 1020 Cash debit
+                ],
+            )
+        finally:
+            conn.close()
+
+    def test_post_ebay_revenue_entry_skips_zero_sale_price(self) -> None:
+        conn = _conn()
+        try:
+            entry_id = _post_ebay_revenue_entry(
+                conn,
+                order_id="ORDER-12",
+                line_item_id="LINE-12",
+                item_name="Ghost",
+                sku=None,
+                sale_price=Decimal("0"),
+                transaction_fees=Decimal("0"),
+                shipping_cost=Decimal("0"),
+            )
+            self.assertIsNone(entry_id)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0], 0)
         finally:
             conn.close()
 

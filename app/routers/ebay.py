@@ -32,6 +32,53 @@ from ..integrations.ebay import (
 router = APIRouter()
 
 
+def _post_ebay_revenue_entry(
+    conn: sqlite3.Connection,
+    *,
+    order_id: str,
+    line_item_id: str,
+    item_name: str,
+    sku: Optional[str],
+    sale_price: Decimal,
+    transaction_fees: Decimal,
+    shipping_cost: Decimal,
+) -> Optional[int]:
+    """Post the revenue/expense entry for an eBay sale line item."""
+    if sale_price <= Decimal("0"):
+        return None
+
+    account_rows = conn.execute(
+        "SELECT code, id FROM accounts WHERE code IN ('1020', '4000', '6050', '6060')"
+    ).fetchall()
+    account_map = {row["code"]: row["id"] for row in account_rows}
+    missing = [c for c in ("1020", "4000", "6050", "6060") if c not in account_map]
+    if missing:
+        raise ValueError(f"Missing required accounts for eBay revenue entry: {missing}")
+
+    net_payout = (sale_price - transaction_fees - shipping_cost).quantize(Decimal("0.01"))
+    label = sku or item_name or f"order {order_id}"
+    lines = [
+        JournalLineInput(account_id=account_map["4000"], credit=sale_price, memo="eBay sale revenue"),
+    ]
+    if transaction_fees > Decimal("0"):
+        lines.append(JournalLineInput(account_id=account_map["6060"], debit=transaction_fees, memo="eBay transaction fees"))
+    if shipping_cost > Decimal("0"):
+        lines.append(JournalLineInput(account_id=account_map["6050"], debit=shipping_cost, memo="Shipping label"))
+    lines.append(JournalLineInput(account_id=account_map["1020"], debit=net_payout, memo="eBay net payout"))
+
+    req = PostEntryRequest(
+        entry_date=date.today(),
+        description=f"eBay sale — {label}",
+        template_id="EBAY_SALE",
+        total_amount=sale_price,
+        lines=lines,
+        created_by_method="import_ebay",
+        notes=f"Auto-generated from eBay order {order_id} line {line_item_id}",
+    )
+    _validate_post_entry(req)
+    return _insert_post_entry(conn, req)
+
+
 def _post_ebay_cogs_entry(
     conn: sqlite3.Connection,
     *,
@@ -383,12 +430,25 @@ def ebay_import_run(
         purchase_date = order.get("creationDate") or order.get("lastModifiedDate") or ""
         line_items = order.get("lineItems") or []
         for idx, line in enumerate(line_items, start=1):
+            sale_price_val = (line.get("lineItemCost") or {}).get("value")
+            fee_total = Decimal("0")
+            for fee in (line.get("marketplaceFees") or []):
+                fv = (fee.get("amount") or {}).get("value")
+                if fv is not None:
+                    try:
+                        fee_total += Decimal(str(fv))
+                    except Exception:
+                        pass
+            ship_val = ((line.get("deliveryCost") or {}).get("shippingCost") or {}).get("value")
             line_candidates.append({
                 "order_id": order_id,
                 "line_item_id": extract_line_item_id(order_id, line, idx),
                 "purchase_date": purchase_date,
                 "sku": extract_line_item_sku(line),
                 "qty_sold": extract_line_item_qty(line),
+                "sale_price": Decimal(str(sale_price_val)).quantize(Decimal("0.01")) if sale_price_val is not None else Decimal("0"),
+                "transaction_fees": fee_total.quantize(Decimal("0.01")),
+                "shipping_cost": Decimal(str(ship_val)).quantize(Decimal("0.01")) if ship_val is not None else Decimal("0"),
             })
 
     order_ids = sorted({r["order_id"] for r in line_candidates})
@@ -447,6 +507,9 @@ def ebay_import_run(
             "item_unit_cost": item_unit_cost,
             "status": status,
             "clamped": clamped,
+            "sale_price": candidate["sale_price"],
+            "transaction_fees": candidate["transaction_fees"],
+            "shipping_cost": candidate["shipping_cost"],
         })
 
     applied_updates = 0
@@ -506,6 +569,16 @@ def ebay_import_run(
                         sku=row["sku"],
                         quantity_deducted=quantity_deducted,
                         unit_cost=Decimal(str(row["item_unit_cost"] or 0)).quantize(Decimal("0.01")),
+                    )
+                    _post_ebay_revenue_entry(
+                        conn,
+                        order_id=row["order_id"],
+                        line_item_id=row["line_item_id"],
+                        item_name=row["item_name"],
+                        sku=row["sku"],
+                        sale_price=Decimal(str(row.get("sale_price") or 0)).quantize(Decimal("0.01")),
+                        transaction_fees=Decimal(str(row.get("transaction_fees") or 0)).quantize(Decimal("0.01")),
+                        shipping_cost=Decimal(str(row.get("shipping_cost") or 0)).quantize(Decimal("0.01")),
                     )
                     applied_logs += 1
                     applied_updates += 1

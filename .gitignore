@@ -8,3 +8,4 @@ data/receipts/
 certs/*.pem
 data/.session_secret
 pull-db.sh
+.session/
