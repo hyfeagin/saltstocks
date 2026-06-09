@@ -32,6 +32,16 @@ from ..integrations.ebay import (
 router = APIRouter()
 
 
+def _pdec(val) -> Decimal:
+    """Safely convert an eBay API value to a Decimal, defaulting to 0."""
+    if val is None:
+        return Decimal("0")
+    try:
+        return Decimal(str(val)).quantize(Decimal("0.01"))
+    except Exception:
+        return Decimal("0")
+
+
 def _post_ebay_revenue_entry(
     conn: sqlite3.Connection,
     *,
@@ -429,26 +439,31 @@ def ebay_import_run(
             continue
         purchase_date = order.get("creationDate") or order.get("lastModifiedDate") or ""
         line_items = order.get("lineItems") or []
+
+        # Fees and buyer-paid shipping live at the order level in pricingSummary,
+        # not on individual line items (marketplaceFees is often empty).
+        pricing = order.get("pricingSummary") or {}
+        order_buyer_shipping = _pdec((pricing.get("deliveryCost") or {}).get("value"))
+        order_total_fees     = _pdec((pricing.get("totalFee") or {}).get("value"))
+        num_lines = max(len(line_items), 1)
+
         for idx, line in enumerate(line_items, start=1):
-            sale_price_val = (line.get("lineItemCost") or {}).get("value")
-            fee_total = Decimal("0")
-            for fee in (line.get("marketplaceFees") or []):
-                fv = (fee.get("amount") or {}).get("value")
-                if fv is not None:
-                    try:
-                        fee_total += Decimal(str(fv))
-                    except Exception:
-                        pass
-            ship_val = ((line.get("deliveryCost") or {}).get("shippingCost") or {}).get("value")
+            item_price    = _pdec((line.get("lineItemCost") or {}).get("value"))
+            label_cost    = _pdec(((line.get("deliveryCost") or {}).get("shippingCost") or {}).get("value"))
+            # Prorate order-level amounts across lines (usually 1 line for resale orders)
+            buyer_shipping = (order_buyer_shipping / num_lines).quantize(Decimal("0.01"))
+            fees_share     = (order_total_fees     / num_lines).quantize(Decimal("0.01"))
+            # Revenue = item price + what buyer paid for shipping (tax excluded — eBay remits it)
+            sale_price     = (item_price + buyer_shipping).quantize(Decimal("0.01"))
             line_candidates.append({
-                "order_id": order_id,
-                "line_item_id": extract_line_item_id(order_id, line, idx),
-                "purchase_date": purchase_date,
-                "sku": extract_line_item_sku(line),
-                "qty_sold": extract_line_item_qty(line),
-                "sale_price": Decimal(str(sale_price_val)).quantize(Decimal("0.01")) if sale_price_val is not None else Decimal("0"),
-                "transaction_fees": fee_total.quantize(Decimal("0.01")),
-                "shipping_cost": Decimal(str(ship_val)).quantize(Decimal("0.01")) if ship_val is not None else Decimal("0"),
+                "order_id":        order_id,
+                "line_item_id":    extract_line_item_id(order_id, line, idx),
+                "purchase_date":   purchase_date,
+                "sku":             extract_line_item_sku(line),
+                "qty_sold":        extract_line_item_qty(line),
+                "sale_price":      sale_price,
+                "transaction_fees": fees_share,
+                "shipping_cost":   label_cost,
             })
 
     order_ids = sorted({r["order_id"] for r in line_candidates})
@@ -507,9 +522,6 @@ def ebay_import_run(
             "item_unit_cost": item_unit_cost,
             "status": status,
             "clamped": clamped,
-            "sale_price": candidate["sale_price"],
-            "transaction_fees": candidate["transaction_fees"],
-            "shipping_cost": candidate["shipping_cost"],
         })
 
     applied_updates = 0
