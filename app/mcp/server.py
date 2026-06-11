@@ -157,10 +157,15 @@ class SaltStocksOAuthProvider(InMemoryOAuthProvider):
 
     # ------------------------------------------------------------------
     # OAuthProvider interface overrides — call super(), then persist to DB
-    # All other methods (authorize, get_client, load_authorization_code,
-    # load_access_token, load_refresh_token, verify_token …) are inherited
-    # from InMemoryOAuthProvider unchanged.
     # ------------------------------------------------------------------
+
+    async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
+        client = await super().get_client(client_id)
+        if client is not None and client.token_endpoint_auth_method is None and not client.client_secret:
+            # Public client with no auth method set — treat as "none" so
+            # ClientAuthenticator doesn't fall through to its else/raise branch.
+            client = client.model_copy(update={"token_endpoint_auth_method": "none"})
+        return client
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
         await super().register_client(client_info)
