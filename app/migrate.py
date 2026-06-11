@@ -422,6 +422,45 @@ def migrate():
             )
             """)
 
+        # Auto-generate MCP bearer token on first run (never overwrite an existing one)
+        if not conn.execute(
+            "SELECT 1 FROM app_settings WHERE key = 'mcp_bearer_token'"
+        ).fetchone():
+            import secrets as _secrets
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('mcp_bearer_token', ?)",
+                (_secrets.token_hex(32),),
+            )
+
+        # mcp_base_url: set to your public HTTPS URL (e.g. https://example.com) to enable
+        # OAuth 2.1 for claude.ai connector registration. Leave empty for bearer-token-only mode.
+        if not conn.execute(
+            "SELECT 1 FROM app_settings WHERE key = 'mcp_base_url'"
+        ).fetchone():
+            conn.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('mcp_base_url', '')"
+            )
+
+        # ── MCP OAuth persistence ─────────────────────────────────────────────
+        if not table_exists(conn, "mcp_oauth_clients"):
+            conn.execute("""
+            CREATE TABLE mcp_oauth_clients (
+                client_id  TEXT PRIMARY KEY,
+                data       TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
+        if not table_exists(conn, "mcp_oauth_tokens"):
+            conn.execute("""
+            CREATE TABLE mcp_oauth_tokens (
+                token      TEXT PRIMARY KEY,
+                token_type TEXT NOT NULL,
+                data       TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """)
+
         # Backfill company default for existing rows:
         # resale -> GV, material -> UM (reasonable default)
         conn.execute("""

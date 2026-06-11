@@ -16,11 +16,13 @@ from .deps import BACKUP_DIR
 from .routers import dashboard, resale, config, ebay, materials
 from .routers import auth as auth_router
 from .accounting import routes as accounting_routes
+from .mcp.server import create_asgi_app as _create_mcp_app
 
 app = FastAPI(title="Salt Stocks")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+app.mount("/mcp", _create_mcp_app())
 
 app.include_router(auth_router.router)
 app.include_router(dashboard.router)
@@ -36,7 +38,8 @@ _PUBLIC_PATHS = {"/login", "/setup"}
 class _AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
-        if path.startswith("/static") or path in _PUBLIC_PATHS:
+        # /mcp handles its own bearer token auth
+        if path.startswith("/static") or path.startswith("/mcp") or path in _PUBLIC_PATHS:
             return await call_next(request)
         if not request.session.get("authenticated"):
             next_url = path

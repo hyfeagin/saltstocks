@@ -57,12 +57,12 @@
 - [x] Created `shortcuts/Pull Production DB.command` — double-click to pull prod DB to local
 - [ ] Test a full round-trip: Mac code change → git push → double-click Deploy → live
 
-### Epic 9 — Security Final Check
-- [ ] Confirm login page is the first thing any browser sees
-- [ ] Confirm only `/login`, `/setup`, `/static` are unauthenticated routes
-- [ ] Install `fail2ban` to block brute-force SSH attempts
-- [ ] Review nginx config: `server_tokens off`, no directory listing enabled
-- [ ] Lock Cockpit (port 9090) to your home IP only:
+### Epic 9 — Security Final Check ✅
+- [x] Confirmed login page is the first thing any browser sees
+- [x] Confirmed only `/login`, `/setup`, `/static` are unauthenticated routes
+- [x] Installed fail2ban to block brute-force SSH attempts
+- [x] nginx config: `server_tokens off` added
+- [ ] Lock Cockpit (port 9090) to your home IP only (revisit when needed):
   ```bash
   # Find your home IP first at https://whatismyip.com
   sudo firewall-cmd --permanent --remove-port=9090/tcp
