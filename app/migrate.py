@@ -451,6 +451,23 @@ def migrate():
             )
             """)
 
+        # Pre-register claude.ai as a known MCP client.
+        # claude.ai skips dynamic registration and uses the hardcoded client_id
+        # "claude-ai" with token_endpoint_auth_method=none (public client / PKCE).
+        import json as _json
+        conn.execute(
+            "INSERT OR IGNORE INTO mcp_oauth_clients (client_id, data) VALUES ('claude-ai', ?)",
+            (_json.dumps({
+                "client_id": "claude-ai",
+                "client_id_issued_at": 0,
+                "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"],
+                "token_endpoint_auth_method": "none",
+                "grant_types": ["authorization_code", "refresh_token"],
+                "response_types": ["code"],
+                "client_name": "Claude",
+            }),),
+        )
+
         if not table_exists(conn, "mcp_oauth_tokens"):
             conn.execute("""
             CREATE TABLE mcp_oauth_tokens (

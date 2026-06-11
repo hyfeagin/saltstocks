@@ -91,7 +91,7 @@ class SaltStocksOAuthProvider(InMemoryOAuthProvider):
             for row in conn.execute("SELECT data FROM mcp_oauth_clients").fetchall():
                 client = OAuthClientInformationFull.model_validate_json(row["data"])
                 if client.client_id:
-                    self._inner.clients[client.client_id] = client
+                    self.clients[client.client_id] = client
 
             now = time.time()
 
@@ -101,7 +101,7 @@ class SaltStocksOAuthProvider(InMemoryOAuthProvider):
             ).fetchall():
                 token = _SDKAccessToken.model_validate_json(row["data"])
                 if token.expires_at is None or token.expires_at > now:
-                    self._inner.access_tokens[token.token] = token
+                    self.access_tokens[token.token] = token
 
             # Load refresh tokens that haven't expired
             for row in conn.execute(
@@ -109,7 +109,7 @@ class SaltStocksOAuthProvider(InMemoryOAuthProvider):
             ).fetchall():
                 token = _SDKRefreshToken.model_validate_json(row["data"])
                 if token.expires_at is None or token.expires_at > now:
-                    self._inner.refresh_tokens[token.token] = token
+                    self.refresh_tokens[token.token] = token
 
         except Exception:
             # Tables don't exist yet on first run — silent; migrate() will create them
