@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -48,7 +49,8 @@ class _AuthMiddleware(BaseHTTPMiddleware):
 # SessionMiddleware must be added last (outermost) so the session is populated
 # before _AuthMiddleware reads it.
 app.add_middleware(_AuthMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=get_session_secret(), https_only=False)
+_https_only = os.getenv("SALTSTOCKS_HTTPS_ONLY", "false").lower() == "true"
+app.add_middleware(SessionMiddleware, secret_key=get_session_secret(), https_only=_https_only)
 
 
 # =========================

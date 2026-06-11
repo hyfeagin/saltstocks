@@ -1,11 +1,42 @@
 from __future__ import annotations
 
+import time as _time
 import urllib.parse
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
+
+_MAX_RETRIES = 2  # up to 2 retries = 3 total attempts
+
+
+def _with_retry(fn: Callable[[], requests.Response]) -> requests.Response:
+    """Call fn() and retry up to _MAX_RETRIES times on network errors or 5xx responses.
+
+    4xx errors are not retried — they indicate a client mistake that won't self-heal.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(_MAX_RETRIES + 1):
+        if attempt > 0:
+            _time.sleep(attempt)  # 1 s, then 2 s
+        try:
+            response = fn()
+        except requests.RequestException as exc:
+            last_exc = exc
+            continue
+        if response.status_code < 500:
+            return response
+        # 5xx — treat as infrastructure error and retry
+        last_exc = None  # will raise EbayIntegrationError below if retries exhausted
+        if attempt < _MAX_RETRIES:
+            continue
+        # All retries exhausted on a 5xx — return the response so the caller can
+        # extract the error message in the normal way.
+        return response
+    raise EbayIntegrationError(
+        f"eBay API unreachable after {_MAX_RETRIES + 1} attempts: {last_exc}"
+    ) from last_exc
 
 OAUTH_ENDPOINT = "https://api.ebay.com/identity/v1/oauth2/token"
 OAUTH_ENDPOINT_SANDBOX = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
@@ -56,20 +87,17 @@ def refresh_access_token(settings: EbaySettings, timeout_seconds: int = 20) -> s
     env = (settings.environment or "SANDBOX").upper()
     endpoint = OAUTH_ENDPOINT if env == "PRODUCTION" else OAUTH_ENDPOINT_SANDBOX
 
-    try:
-        response = requests.post(
-            endpoint,
-            auth=(client_id, client_secret),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "scope": "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
-            },
-            timeout=timeout_seconds,
-        )
-    except requests.RequestException as exc:
-        raise EbayIntegrationError(f"Unable to reach eBay OAuth endpoint: {exc}") from exc
+    response = _with_retry(lambda: requests.post(
+        endpoint,
+        auth=(client_id, client_secret),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "scope": "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
+        },
+        timeout=timeout_seconds,
+    ))
 
     if response.status_code >= 400:
         message = _best_error_message(response)
@@ -125,20 +153,17 @@ def exchange_code_for_tokens(
     env = (settings.environment or "SANDBOX").upper()
     endpoint = OAUTH_ENDPOINT if env == "PRODUCTION" else OAUTH_ENDPOINT_SANDBOX
 
-    try:
-        response = requests.post(
-            endpoint,
-            auth=(client_id, client_secret),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            data={
-                "grant_type": "authorization_code",
-                "code": code.strip(),
-                "redirect_uri": ru_name.strip(),
-            },
-            timeout=timeout_seconds,
-        )
-    except requests.RequestException as exc:
-        raise EbayIntegrationError(f"Unable to reach eBay OAuth endpoint: {exc}") from exc
+    response = _with_retry(lambda: requests.post(
+        endpoint,
+        auth=(client_id, client_secret),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type": "authorization_code",
+            "code": code.strip(),
+            "redirect_uri": ru_name.strip(),
+        },
+        timeout=timeout_seconds,
+    ))
 
     if response.status_code >= 400:
         message = _best_error_message(response)
@@ -194,10 +219,9 @@ def fetch_orders(
             "offset": offset,
         }
 
-        try:
-            response = requests.get(endpoint, headers=headers, params=params, timeout=timeout_seconds)
-        except requests.RequestException as exc:
-            raise EbayIntegrationError(f"Unable to fetch eBay orders: {exc}") from exc
+        response = _with_retry(
+            lambda: requests.get(endpoint, headers=headers, params=params, timeout=timeout_seconds)
+        )
 
         if response.status_code >= 400:
             message = _best_error_message(response)

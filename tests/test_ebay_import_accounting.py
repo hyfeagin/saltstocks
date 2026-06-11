@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import unittest
 from decimal import Decimal
+from pathlib import Path
 
-from app.routers.ebay import _post_ebay_cogs_entry, _post_ebay_revenue_entry
+from app.routers.ebay import _extract_line_candidates, _post_ebay_cogs_entry, _post_ebay_revenue_entry
 
 
 def _conn() -> sqlite3.Connection:
@@ -207,6 +209,43 @@ class EbayRevenueEntryTests(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM journal_entries").fetchone()[0], 0)
         finally:
             conn.close()
+
+
+class EbayOrderExtractionTests(unittest.TestCase):
+    """Integration tests using a real (sanitized) eBay order API response fixture."""
+
+    FIXTURE = Path(__file__).parent / "fixtures" / "funko_order.json"
+
+    def _order(self):
+        with open(self.FIXTURE) as f:
+            return json.load(f)["orders"][0]
+
+    def test_sale_price_equals_item_plus_buyer_shipping(self) -> None:
+        """sale_price = lineItemCost + pricingSummary.deliveryCost (tax excluded)."""
+        candidates = _extract_line_candidates(self._order())
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["sale_price"], Decimal("19.19"))
+
+    def test_fees_read_from_total_marketplace_fee(self) -> None:
+        """transaction_fees comes from order-level totalMarketplaceFee, not pricingSummary."""
+        candidates = _extract_line_candidates(self._order())
+        self.assertEqual(candidates[0]["transaction_fees"], Decimal("3.11"))
+
+    def test_shipping_cost_is_label_not_buyer_shipping(self) -> None:
+        """shipping_cost is the seller's label (lineItem.deliveryCost.shippingCost)."""
+        candidates = _extract_line_candidates(self._order())
+        self.assertEqual(candidates[0]["shipping_cost"], Decimal("6.69"))
+
+    def test_net_payout_math(self) -> None:
+        """sale_price - fees - label = order earnings reported by eBay ($9.39)."""
+        c = _extract_line_candidates(self._order())[0]
+        net = (c["sale_price"] - c["transaction_fees"] - c["shipping_cost"]).quantize(Decimal("0.01"))
+        self.assertEqual(net, Decimal("9.39"))
+
+    def test_sku_and_order_id_extracted(self) -> None:
+        c = _extract_line_candidates(self._order())[0]
+        self.assertEqual(c["order_id"], "04-14734-54875")
+        self.assertEqual(c["sku"], "GV-MISC-000019")
 
 
 if __name__ == "__main__":

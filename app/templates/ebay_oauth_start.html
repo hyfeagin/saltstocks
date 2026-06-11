@@ -5,9 +5,9 @@
 
 <div class="card">
   <h3>Authorize access</h3>
-  <p>Click the button below to open eBay's authorization page. Sign in with your eBay seller account and click <b>Agree</b>.</p>
-  <p>After you approve access, eBay will redirect your browser back to this app automatically and save your token — no copy-pasting needed.</p>
-  <a href="{{ auth_url }}" class="btn btn-primary" style="text-decoration:none;">Open eBay Authorization Page</a>
+  <p>Click the button below to open eBay's authorization page in a new tab. Sign in with your eBay seller account and click <b>Agree</b>.</p>
+  <p>On the server, eBay redirects back automatically. Locally, copy the full URL from the address bar after approving and paste it in the form below.</p>
+  <a href="{{ auth_url }}" class="btn btn-primary" style="text-decoration:none;" target="_blank" rel="noopener">Open eBay Authorization Page</a>
   <a href="/config#ebay-settings" class="btn" style="text-decoration:none; margin-left:8px;">Cancel</a>
 </div>
 

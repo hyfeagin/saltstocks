@@ -1,0 +1,121 @@
+{
+  "href": "https://api.ebay.com/sell/fulfillment/v1/order?limit=50&offset=0",
+  "total": 1,
+  "limit": 50,
+  "offset": 0,
+  "orders": [
+    {
+      "orderId": "04-14734-54875",
+      "legacyOrderId": "04-14734-54875",
+      "creationDate": "2026-06-03T23:08:28.000Z",
+      "lastModifiedDate": "2026-06-09T19:27:40.000Z",
+      "orderFulfillmentStatus": "FULFILLED",
+      "orderPaymentStatus": "PAID",
+      "sellerId": "geekery_vault",
+      "buyer": {
+        "username": "test_buyer",
+        "taxAddress": {
+          "city": "Testville",
+          "stateOrProvince": "MD",
+          "postalCode": "00000",
+          "countryCode": "US"
+        },
+        "buyerRegistrationAddress": {
+          "fullName": "Test Buyer",
+          "contactAddress": {
+            "addressLine1": "123 Test St",
+            "city": "Testville",
+            "stateOrProvince": "MD",
+            "postalCode": "00000",
+            "countryCode": "US"
+          },
+          "primaryPhone": { "phoneNumber": "0000000000" },
+          "email": "test@example.com"
+        }
+      },
+      "pricingSummary": {
+        "priceSubtotal": { "value": "12.0", "currency": "USD" },
+        "deliveryCost":  { "value": "7.19", "currency": "USD" },
+        "total":         { "value": "19.19", "currency": "USD" }
+      },
+      "cancelStatus": {
+        "cancelState": "NONE_REQUESTED",
+        "cancelRequests": []
+      },
+      "paymentSummary": {
+        "totalDueSeller": { "value": "16.08", "currency": "USD" },
+        "refunds": [],
+        "payments": [
+          {
+            "paymentMethod": "EBAY",
+            "paymentReferenceId": "420004_S",
+            "paymentDate": "2026-06-03T23:08:29.110Z",
+            "amount": { "value": "16.08", "currency": "USD" },
+            "paymentStatus": "PAID"
+          }
+        ]
+      },
+      "fulfillmentStartInstructions": [
+        {
+          "fulfillmentInstructionsType": "SHIP_TO",
+          "ebaySupportedFulfillment": false,
+          "shippingStep": {
+            "shipTo": {
+              "fullName": "Test Buyer",
+              "contactAddress": {
+                "addressLine1": "123 Test St",
+                "city": "Testville",
+                "stateOrProvince": "MD",
+                "postalCode": "00000",
+                "countryCode": "US"
+              },
+              "primaryPhone": { "phoneNumber": "0000000000" },
+              "email": "test@example.com"
+            },
+            "shippingCarrierCode": "USPS",
+            "shippingServiceCode": "USPSParcel"
+          }
+        }
+      ],
+      "fulfillmentHrefs": [
+        "https://api.ebay.com/sell/fulfillment/v1/order/04-14734-54875/shipping_fulfillment/9434608106244197472227"
+      ],
+      "lineItems": [
+        {
+          "lineItemId": "10081939015804",
+          "legacyItemId": "267662081965",
+          "sku": "GV-MISC-000019",
+          "title": "Elle With Bruiser Funko PoP! - Movies #1224 - 2022",
+          "lineItemCost": { "value": "12.0", "currency": "USD" },
+          "quantity": 1,
+          "soldFormat": "FIXED_PRICE",
+          "listingMarketplaceId": "EBAY_US",
+          "purchaseMarketplaceId": "EBAY_US",
+          "lineItemFulfillmentStatus": "FULFILLED",
+          "total": { "value": "19.19", "currency": "USD" },
+          "deliveryCost": {
+            "shippingCost": { "value": "6.69", "currency": "USD" },
+            "handlingCost": { "value": "0.5",  "currency": "USD" }
+          },
+          "appliedPromotions": [],
+          "taxes": [],
+          "ebayCollectAndRemitTaxes": [
+            {
+              "taxType": "STATE_SALES_TAX",
+              "amount": { "value": "0.75", "currency": "USD" },
+              "collectionMethod": "NET"
+            }
+          ],
+          "properties": { "buyerProtection": true },
+          "lineItemFulfillmentInstructions": {
+            "guaranteedDelivery": false
+          }
+        }
+      ],
+      "ebayCollectAndRemitTax": true,
+      "salesRecordReference": "719",
+      "totalFeeBasisAmount":  { "value": "19.94", "currency": "USD" },
+      "totalMarketplaceFee":  { "value": "3.11",  "currency": "USD" }
+    }
+  ]
+}

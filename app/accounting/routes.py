@@ -15,7 +15,7 @@ from urllib.parse import quote
 import csv
 import zipfile
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from app.deps import BASE_DIR, get_db, render
@@ -49,8 +49,6 @@ from app.accounting.reports import (
     receipt_index,
     sales_tax_summary,
 )
-from app.accounting.nlp import CONFIDENCE_THRESHOLD, NLPResult, parse_transaction
-from app.accounting.questionnaire import _QUESTIONNAIRE_TEMPLATES
 from app.accounting.schemas import TransactionAnswerSet
 from app.utils import get_next_sku
 
@@ -938,32 +936,6 @@ def sales_tax_settings_submit(
     return RedirectResponse(url="/accounting/settings/sales-tax?saved=1", status_code=303)
 
 
-@router.get("/settings/ai", response_class=HTMLResponse)
-def ai_settings_page(
-    request: Request,
-    saved: int = 0,
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    return render(
-        "accounting/settings_ai.html",
-        request,
-        saved=saved == 1,
-        ai_enabled=_get_setting(conn, "ai_enabled") == "1",
-        has_api_key=bool(_get_setting(conn, "anthropic_api_key")),
-    )
-
-
-@router.post("/settings/ai")
-def ai_settings_save(
-    ai_enabled: str = Form(""),
-    anthropic_api_key: str = Form(""),
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    _set_setting(conn, "ai_enabled", "1" if ai_enabled == "1" else "0")
-    if anthropic_api_key.strip():
-        _set_setting(conn, "anthropic_api_key", anthropic_api_key.strip())
-    return RedirectResponse(url="/accounting/settings/ai?saved=1", status_code=303)
-
 
 # ── Manual Entry Form (developer harness) ─────────────────────────────────────
 
@@ -1633,72 +1605,6 @@ def _delete_session(conn: sqlite3.Connection, session_id: str) -> None:
         )
 
 
-# ── NLP prefill helper ────────────────────────────────────────────────────────
-
-def _prefill_session_from_nlp(session: QuestionnaireSession, result: NLPResult) -> None:
-    """Write NLP-extracted fields into a fresh session, skipping low-confidence ones."""
-    conf = result.confidence
-    template_id = result.template_id
-
-    if template_id and conf.get("template_id", 0) >= CONFIDENCE_THRESHOLD:
-        if template_id in CATALOG:
-            session.answers["template_id"] = template_id
-            session.history.append("template_id")
-        else:
-            template_id = None
-
-    if result.total_amount and conf.get("total_amount", 0) >= CONFIDENCE_THRESHOLD:
-        try:
-            session.answers["total_amount"] = Decimal(result.total_amount).quantize(Decimal("0.01"))
-            step_id = "total_amount_reimburse_owner" if template_id == "REIMBURSE_OWNER" else "total_amount"
-            session.history.append(step_id)
-        except Exception:
-            pass
-
-    if result.entry_date and conf.get("entry_date", 0) >= CONFIDENCE_THRESHOLD:
-        session.answers["entry_date"] = result.entry_date
-        session.history.append("entry_date")
-
-    if result.vendor and conf.get("vendor", 0) >= CONFIDENCE_THRESHOLD:
-        session.answers["vendor"] = result.vendor
-        session.history.append("vendor")
-
-    if result.payment_account_id and conf.get("payment_account_id", 0) >= CONFIDENCE_THRESHOLD:
-        session.answers["payment_account_id"] = result.payment_account_id
-        step_id = (
-            "payment_account_id_reimburse_owner"
-            if template_id == "REIMBURSE_OWNER"
-            else "payment_account_id"
-        )
-        session.history.append(step_id)
-
-    if result.memo and conf.get("memo", 0) >= CONFIDENCE_THRESHOLD:
-        session.answers["memo"] = result.memo
-        session.history.append("memo")
-
-    # Split purchase: prefill has_expense_splits + expense_splits when AI is confident
-    if (
-        result.is_split_purchase
-        and result.expense_splits
-        and conf.get("expense_splits", 0) >= CONFIDENCE_THRESHOLD
-        and template_id in ("BUY_INVENTORY", "BUY_INVENTORY_PERSONAL", "BUY_MATERIALS", "BUY_MATERIALS_PERSONAL")
-    ):
-        session.answers["has_expense_splits"] = "yes"
-        session.history.append("has_expense_splits")
-        session.answers["expense_splits"] = result.expense_splits
-        session.history.append("expense_splits")
-
-
-def _compute_remaining_steps(session: QuestionnaireSession) -> list[dict]:
-    """Non-optional visible steps not yet answered — what the user still needs to fill in."""
-    answered = set(session.history)
-    return [
-        {"step_id": s.id, "question": s.question, "input_type": s.input_type}
-        for s in GLOBAL_FLOW
-        if s.id not in answered
-        and not s.optional
-        and (s.shown_when is None or s.shown_when(session.answers))
-    ]
 
 
 # ── Questionnaire routes ──────────────────────────────────────────────────────
@@ -1713,11 +1619,9 @@ def entry_start(
 ):
     """Show the entry chooser (no template_id) or start a questionnaire session."""
     if not template_id:
-        ai_enabled = _get_setting(conn, "ai_enabled") == "1"
         return render(
             "accounting/entry_chooser.html",
             request,
-            ai_enabled=ai_enabled,
             error="",
         )
 
@@ -1748,119 +1652,6 @@ def entry_start(
         status_code=303,
     )
 
-
-@router.post("/entry/ai-start", response_class=HTMLResponse)
-def entry_ai_start(
-    request: Request,
-    user_text: str = Form(...),
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    """Parse natural language, prefill a session, redirect to first unanswered step."""
-    ai_enabled = _get_setting(conn, "ai_enabled") == "1"
-    api_key = _get_setting(conn, "anthropic_api_key")
-
-    def _chooser_error(msg: str):
-        return render(
-            "accounting/entry_chooser.html",
-            request,
-            ai_enabled=ai_enabled,
-            error=msg,
-        )
-
-    if not ai_enabled:
-        return _chooser_error("AI mode is not enabled. Enable it in AI Settings.")
-    if not api_key:
-        return _chooser_error("No API key configured. Add one in AI Settings.")
-    if not user_text.strip():
-        return _chooser_error("Please describe the transaction before submitting.")
-
-    acct_rows = conn.execute(
-        "SELECT id, code, name, subtype FROM accounts ORDER BY code"
-    ).fetchall()
-    accounts = [
-        {"id": r["id"], "code": r["code"], "name": r["name"], "subtype": r["subtype"] or ""}
-        for r in acct_rows
-    ]
-
-    from datetime import date as date_cls
-    result = parse_transaction(user_text, accounts, date_cls.today(), api_key)
-
-    if result.error:
-        return _chooser_error(
-            f"AI couldn't reach the server — pick a template below to continue manually."
-        )
-
-    session = QuestionnaireSession()
-    _prefill_session_from_nlp(session, result)
-    _save_session(conn, session)
-    return RedirectResponse(
-        url=f"/accounting/entry/step/{session.session_id}",
-        status_code=303,
-    )
-
-
-@router.post("/entry/parse")
-def entry_parse(
-    description: str = Body(..., embed=True),
-    conn: sqlite3.Connection = Depends(get_db),
-):
-    """JSON API: parse natural language → partial answer-set + remaining steps.
-
-    Request body (JSON): {"description": "..."}
-    Success: 200 with session_id, prefilled, confidence, remaining_steps, redirect_url
-    Failure: 4xx/502 with error + fallback: true
-    """
-    ai_enabled = _get_setting(conn, "ai_enabled") == "1"
-    api_key = _get_setting(conn, "anthropic_api_key")
-
-    if not ai_enabled:
-        return JSONResponse(
-            {"error": "AI mode is not enabled.", "fallback": True},
-            status_code=400,
-        )
-    if not api_key:
-        return JSONResponse(
-            {"error": "No Anthropic API key configured.", "fallback": True},
-            status_code=400,
-        )
-    if not description or not description.strip():
-        return JSONResponse({"error": "Description is required."}, status_code=400)
-
-    acct_rows = conn.execute(
-        "SELECT id, code, name, subtype FROM accounts ORDER BY code"
-    ).fetchall()
-    accounts = [
-        {"id": r["id"], "code": r["code"], "name": r["name"], "subtype": r["subtype"] or ""}
-        for r in acct_rows
-    ]
-
-    result = parse_transaction(description.strip(), accounts, date_type.today(), api_key)
-
-    if result.error:
-        import logging
-        logging.getLogger(__name__).error("NLP parse failed: %s", result.error)
-        return JSONResponse(
-            {"error": result.error, "fallback": True},
-            status_code=502,
-        )
-
-    session = QuestionnaireSession()
-    _prefill_session_from_nlp(session, result)
-    _save_session(conn, session)
-
-    prefilled = {
-        k: str(v) for k, v in session.answers.items()
-        if v is not None and k != "receipt_files"
-    }
-
-    return JSONResponse({
-        "session_id": session.session_id,
-        "prefilled": prefilled,
-        "confidence": result.confidence,
-        "payment_account_hint": result.payment_account_hint,
-        "remaining_steps": _compute_remaining_steps(session),
-        "redirect_url": f"/accounting/entry/step/{session.session_id}",
-    })
 
 
 @router.get("/entry/step/{session_id}", response_class=HTMLResponse)

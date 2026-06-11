@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import urllib.parse as _up
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -142,6 +143,46 @@ def _post_ebay_cogs_entry(
     return _insert_post_entry(conn, req)
 
 
+def _extract_line_candidates(order: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert one eBay order dict into a list of line-item candidate dicts.
+
+    Financial fields are extracted from their correct API locations:
+    - buyer shipping:   pricingSummary.deliveryCost  (order-level, prorated across lines)
+    - seller fees:      totalMarketplaceFee           (order-level, prorated across lines)
+    - label cost:       lineItem.deliveryCost.shippingCost
+    - revenue:          lineItemCost + buyer_shipping (tax excluded — eBay remits it)
+    """
+    order_id = str(order.get("orderId") or "").strip()
+    if not order_id:
+        return []
+    purchase_date = order.get("creationDate") or order.get("lastModifiedDate") or ""
+    line_items = order.get("lineItems") or []
+
+    pricing = order.get("pricingSummary") or {}
+    order_buyer_shipping = _pdec((pricing.get("deliveryCost") or {}).get("value"))
+    order_total_fees     = _pdec((order.get("totalMarketplaceFee") or {}).get("value"))
+    num_lines = max(len(line_items), 1)
+
+    candidates: List[Dict[str, Any]] = []
+    for idx, line in enumerate(line_items, start=1):
+        item_price     = _pdec((line.get("lineItemCost") or {}).get("value"))
+        label_cost     = _pdec(((line.get("deliveryCost") or {}).get("shippingCost") or {}).get("value"))
+        buyer_shipping = (order_buyer_shipping / num_lines).quantize(Decimal("0.01"))
+        fees_share     = (order_total_fees     / num_lines).quantize(Decimal("0.01"))
+        sale_price     = (item_price + buyer_shipping).quantize(Decimal("0.01"))
+        candidates.append({
+            "order_id":         order_id,
+            "line_item_id":     extract_line_item_id(order_id, line, idx),
+            "purchase_date":    purchase_date,
+            "sku":              extract_line_item_sku(line),
+            "qty_sold":         extract_line_item_qty(line),
+            "sale_price":       sale_price,
+            "transaction_fees": fees_share,
+            "shipping_cost":    label_cost,
+        })
+    return candidates
+
+
 def _ebay_import_response(
     request: Request,
     start_date: date,
@@ -154,6 +195,7 @@ def _ebay_import_response(
     error_message: Optional[str],
     success_message: Optional[str],
     missing_credentials: Optional[List[str]] = None,
+    all_resale_items_for_js: str = "[]",
 ):
     """Shared template response builder for the eBay import page."""
     return render("ebay_import.html", request,
@@ -167,6 +209,7 @@ def _ebay_import_response(
         success_message=success_message,
         status_note=status_note,
         missing_credentials=missing_credentials or [],
+        all_resale_items_for_js=all_resale_items_for_js,
     )
 
 
@@ -368,6 +411,8 @@ def ebay_import_run(
     status_filter: str = Form("PAID"),
     dry_run: str = Form("0"),
     action: str = Form("preview"),
+    manual_match: List[str] = Form(default=[]),
+    label_override: List[str] = Form(default=[]),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     today = date.today()
@@ -434,37 +479,7 @@ def ebay_import_run(
 
     line_candidates: List[Dict[str, Any]] = []
     for order in orders:
-        order_id = str(order.get("orderId") or "").strip()
-        if not order_id:
-            continue
-        purchase_date = order.get("creationDate") or order.get("lastModifiedDate") or ""
-        line_items = order.get("lineItems") or []
-
-        # Fees and buyer-paid shipping live at the order level in pricingSummary,
-        # not on individual line items (marketplaceFees is often empty).
-        pricing = order.get("pricingSummary") or {}
-        order_buyer_shipping = _pdec((pricing.get("deliveryCost") or {}).get("value"))
-        order_total_fees     = _pdec((pricing.get("totalFee") or {}).get("value"))
-        num_lines = max(len(line_items), 1)
-
-        for idx, line in enumerate(line_items, start=1):
-            item_price    = _pdec((line.get("lineItemCost") or {}).get("value"))
-            label_cost    = _pdec(((line.get("deliveryCost") or {}).get("shippingCost") or {}).get("value"))
-            # Prorate order-level amounts across lines (usually 1 line for resale orders)
-            buyer_shipping = (order_buyer_shipping / num_lines).quantize(Decimal("0.01"))
-            fees_share     = (order_total_fees     / num_lines).quantize(Decimal("0.01"))
-            # Revenue = item price + what buyer paid for shipping (tax excluded — eBay remits it)
-            sale_price     = (item_price + buyer_shipping).quantize(Decimal("0.01"))
-            line_candidates.append({
-                "order_id":        order_id,
-                "line_item_id":    extract_line_item_id(order_id, line, idx),
-                "purchase_date":   purchase_date,
-                "sku":             extract_line_item_sku(line),
-                "qty_sold":        extract_line_item_qty(line),
-                "sale_price":      sale_price,
-                "transaction_fees": fees_share,
-                "shipping_cost":   label_cost,
-            })
+        line_candidates.extend(_extract_line_candidates(order))
 
     order_ids = sorted({r["order_id"] for r in line_candidates})
     imported_keys: set = set()
@@ -476,21 +491,66 @@ def ebay_import_run(
         ).fetchall()
         imported_keys = {(r["order_id"], r["line_item_id"]) for r in imported_rows}
 
-    skus = sorted({r["sku"] for r in line_candidates if r["sku"]})
+    # Load all resale items for SKU matching, manual-match lookup, and the search UI.
+    all_resale_items = conn.execute(
+        "SELECT id, sku, name, qty_on_hand, unit_cost FROM items WHERE item_type='resale' ORDER BY name"
+    ).fetchall()
     items_by_sku: Dict[str, sqlite3.Row] = {}
-    if skus:
-        placeholders = ",".join(["?"] * len(skus))
-        item_rows = conn.execute(
-            f"SELECT id, sku, name, qty_on_hand, unit_cost FROM items WHERE item_type='resale' AND sku IN ({placeholders}) ORDER BY id ASC",
-            tuple(skus),
-        ).fetchall()
-        for item in item_rows:
-            items_by_sku.setdefault(item["sku"], item)
+    items_by_id: Dict[int, sqlite3.Row] = {}
+    for _item in all_resale_items:
+        items_by_id[_item["id"]] = _item
+        if _item["sku"]:
+            items_by_sku.setdefault(_item["sku"], _item)
+
+    all_resale_items_for_js = json.dumps([
+        {"id": r["id"], "sku": r["sku"] or "", "name": r["name"]}
+        for r in all_resale_items
+    ])
+
+    # Parse manual matches submitted from the preview form.
+    # Each value is "order_id|line_item_id|item_id".
+    manual_matches: Dict[Tuple[str, str], int] = {}
+    for mm in (manual_match or []):
+        if not mm:
+            continue
+        parts = mm.split("|", 2)
+        if len(parts) == 3 and parts[2]:
+            try:
+                manual_matches[(parts[0], parts[1])] = int(parts[2])
+            except ValueError:
+                pass
+
+    # Parse label cost overrides (needed for free-shipping orders where the API
+    # reports $0 for shippingCost but the seller still paid for a label).
+    # Each value is "order_id|line_item_id|amount".
+    label_overrides: Dict[Tuple[str, str], Decimal] = {}
+    for lo in (label_override or []):
+        if not lo:
+            continue
+        parts = lo.split("|", 2)
+        if len(parts) == 3 and parts[2]:
+            try:
+                amt = Decimal(parts[2]).quantize(Decimal("0.01"))
+                if amt > Decimal("0"):
+                    label_overrides[(parts[0], parts[1])] = amt
+            except Exception:
+                pass
+
+    # Apply label overrides to candidates before building preview rows.
+    for candidate in line_candidates:
+        key = (candidate["order_id"], candidate["line_item_id"])
+        if key in label_overrides:
+            candidate["shipping_cost"] = label_overrides[key]
 
     for candidate in line_candidates:
         key = (candidate["order_id"], candidate["line_item_id"])
         sku = candidate["sku"]
         item = items_by_sku.get(sku) if sku else None
+        manually_matched = False
+
+        if item is None and key in manual_matches:
+            item = items_by_id.get(manual_matches[key])
+            manually_matched = item is not None
 
         status = "unmatched"
         item_name = ""
@@ -507,7 +567,10 @@ def ebay_import_run(
             item_unit_cost = float(item["unit_cost"] or 0)
             projected_qty = max(0.0, current_qty - candidate["qty_sold"])
             clamped = candidate["qty_sold"] > current_qty
-            status = "oversold/clamped" if clamped else "matched"
+            if manually_matched:
+                status = "oversold/clamped" if clamped else "manually matched"
+            else:
+                status = "oversold/clamped" if clamped else "matched"
 
         if key in imported_keys:
             status = "already imported"
@@ -538,7 +601,7 @@ def ebay_import_run(
         try:
             with conn:
                 for row in preview_rows:
-                    if row["status"] not in {"matched", "oversold/clamped"}:
+                    if row["status"] not in {"matched", "oversold/clamped", "manually matched"}:
                         continue
                     try:
                         conn.execute(
@@ -609,6 +672,7 @@ def ebay_import_run(
         "orders_seen": len(orders),
         "line_items_seen": len(preview_rows),
         "matched": sum(1 for r in preview_rows if r["status"] == "matched"),
+        "manually_matched": sum(1 for r in preview_rows if r["status"] == "manually matched"),
         "unmatched": sum(1 for r in preview_rows if r["status"] == "unmatched"),
         "already_imported": sum(1 for r in preview_rows if r["status"] == "already imported"),
         "clamped": sum(1 for r in preview_rows if r["status"] == "oversold/clamped"),
@@ -618,6 +682,7 @@ def ebay_import_run(
     return _ebay_import_response(
         request, start_date_value, end_date_value, status_filter_value, dry_run_enabled,
         status_note, preview_rows, summary, error_message, success_message,
+        all_resale_items_for_js=all_resale_items_for_js,
     )
 # =========================
 # ANCHOR: EBAY_IMPORT_END

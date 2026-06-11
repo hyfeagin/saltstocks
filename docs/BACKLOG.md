@@ -221,36 +221,76 @@ def post_split_entry(answer_set):
 
 ---
 
-### [x] AI Assist — Detect & Route Mixed Inventory + Expense Purchases
+### [x] AI Assist — Detect & Route Mixed Inventory + Expense Purchases — REMOVED
 
-**Depends on:** Split Purchase Flow (above)
+**Superseded by MCP Server approach** (see below). Built-in NLP parsing via `app/accounting/nlp.py` has been removed from the codebase. AI interaction with SaltStocks data now happens through the Claude.ai MCP connector instead of a baked-in API key + prompt chain.
 
-**Goal:** Extend the NLP layer (`app/accounting/nlp.py`) so that when the user describes a purchase containing both inventory and non-inventory items, the AI detects the split and routes into the Split Purchase flow with pre-filled amounts — rather than forcing the user to pick a single template upfront.
+---
 
-**Examples the AI should handle:**
-- "Bought 50 Funko Pops for $200 and a roll of bubble wrap for $12 from a wholesaler, paid with Chase debit"
-- "Amazon order — $180 in inventory plus $25 of shipping supplies, personal card"
+### [ ] MCP Server — Claude AI Integration
+
+**Goal:** Expose live SaltStocks data to Claude via a custom remote MCP connector, enabling real financial conversation in claude.ai without spreadsheet uploads.
+
+**Spec:** `docs/SaltStocks — MCP Server Specification.md`
+
+**Tools to implement (in order):**
+1. `get_pnl_summary` — revenue, COGS, gross profit, net income for a period (MTD / YTD / all-time)
+2. `get_inventory_snapshot` — all items with qty, WAC, status, and total value
+3. `get_item_detail` — cost history, sale event, and margin for one SKU
+4. `get_sale_history` — eBay sale performance by month or by item
+5. `simulate_ebay_sale` — pricing simulator: fees, net payout, break-even price
+6. `get_recent_journal_entries` — ledger review, up to 50 entries
+
+**Architecture:**
+- Mount FastMCP app at `/mcp` inside the existing FastAPI app — no separate process
+- Shared SQLite connection; all tools delegate to service/query functions (no duplicated SQL)
+- Read-only v1; no write operations through MCP
+- Bearer token auth as v1 placeholder; OAuth 2.1 for v2
+
+**New files:** `app/mcp/server.py`, `app/mcp/tools.py`, `app/services/mcp_queries.py`, `app/services/ebay_fee_calculator.py`, `tests/test_mcp_tools.py`
+
+**Acceptance criteria:** All 12 criteria in spec Section 5, including:
+- All six tools discoverable and callable from a claude.ai custom connector
+- `get_pnl_summary ytd` net_income matches the in-app P&L report (within $0.01)
+- No tool can mutate any database row
+- Unauthenticated requests to `/mcp` return 401
+- All monetary fields are decimal strings (no floats)
+
+**Blockers:**
+- VPS must be live and publicly reachable before connector registration
+- eBay OAuth redirect URI must point to VPS hostname
+
+---
+
+### [ ] eBay Finances API — Automatic Seller Label Cost via `getOrderEarningsById`
+
+**Goal:** Replace the manual label override input for free-shipping orders with automatic label cost retrieval from eBay's Finances API.
+
+**Context:** The eBay Fulfillment API (`getOrders` / `getOrder`) returns `lineItem.deliveryCost.shippingCost`, which is the *buyer's* base shipping charge. When the buyer gets free shipping, this returns $0 — even though the seller still paid for a label. The manual orange-bordered override input in the eBay import preview is the current workaround.
+
+**Solution:** Call `GET /sell/finances/v1/order_earnings/{order_id}` from the eBay Finances API after fetching the order. The response includes `orderEarningsSummary.expenses.shippingLabels.value`, which is the actual seller label cost regardless of what the buyer paid.
+
+**Implementation sketch:**
+- After fetching each order via Fulfillment API, call `GET /sell/finances/v1/order_earnings/{order_id}`
+- Extract `earnings["orderEarningsSummary"]["expenses"]["shippingLabels"]["value"]`
+- Use as `shipping_cost` in `_extract_line_candidates()` instead of `lineItem.deliveryCost.shippingCost`
+- Fall back to Fulfillment API value if Finances API call fails
+
+**Blockers:**
+1. **Gated API access** — Submit an application growth check to eBay before access is granted
+2. **New OAuth scope** — `sell.finances.earnings.read` must be added to the eBay app and re-consent obtained
+3. **Coverage gap** — Only covers orders from 2024 onwards; error `135020` for older orders. Manual override still needed as fallback.
+
+**Note on digital signatures:** Per eBay's documentation, signatures are only required for EU/UK-domiciled sellers. As a US seller (Geekery Vault), no digital signature implementation is needed.
 
 **Acceptance criteria:**
-- `NLPResult` gains optional fields: `is_split_purchase: bool`, `inventory_amount: Decimal | None`, `expense_splits: list[{account_code, amount, memo}] | None`
-- System prompt updated with split-purchase detection rules: if the user mentions both inventory and a non-inventory expense in the same transaction, set `is_split_purchase=True` and break out the amounts
-- `POST /accounting/entry/parse` checks `result.is_split_purchase` and redirects into the split purchase questionnaire sub-flow with pre-filled inventory and expense amounts
-- Confidence scores required for `inventory_amount` and each expense split; low-confidence splits fall through to the questionnaire for manual confirmation
-- Fallback: if AI is uncertain about the split, it routes to a standard BUY_INVENTORY session and surfaces a "Did you also buy non-inventory items?" prompt in the questionnaire
+- `getOrderEarningsById` called per order after `getOrder` succeeds
+- `expenses.shippingLabels.value` used as `shipping_cost` when available and > 0
+- Falls back to current Fulfillment API logic if Finances API call fails or returns $0
+- Orange manual override suppressed when Finances API provides a non-zero value
+- Orange manual override still shown when Finances API is unavailable
 
-**System prompt additions:**
-```
-MIXED PURCHASE (inventory + expense on same receipt):
-  If the description mentions BOTH inventory items AND non-inventory items
-  (e.g. bubble wrap, office supplies, software) on the same transaction:
-  - Set is_split_purchase: true
-  - Set inventory_amount: the portion that is inventory
-  - Set expense_splits: [{account_code, amount, memo}, ...] for each non-inventory line
-  - The sum of inventory_amount + all expense_splits must equal total_amount
-  Never guess a split; if uncertain, set is_split_purchase: false and flag in memo.
-```
-
-**Files:** `app/accounting/nlp.py`, `app/accounting/routes.py` (`entry_parse`, `_prefill_session_from_nlp`)
+**Files:** `app/routers/ebay.py`, `app/integrations/ebay.py`, eBay credential profile (add scope), `app/templates/ebay_import.html`
 
 ---
 
@@ -475,23 +515,17 @@ Items sourced from the accounting vision document. These represent the evolution
 
 ---
 
-### [ ] Plain-Language Event Entry
+### [ ] Plain-Language Event Entry — via MCP
 
 **Vision area:** A
 
-**Goal:** Allow the user to describe a business event in ordinary language and have SaltStocks interpret it, classify it, and update inventory and bookkeeping records automatically.
+**Goal:** Allow Holly to describe a business event in ordinary language and have SaltStocks interpret it, classify it, and update inventory and bookkeeping records.
 
-**Examples:** "I bought this sock today for $10." / "Used 4 socks in spa bags." / "Sold 2 bags at the booth for $40 cash." / "Took 1 felted bar as a tester."
+**Strategy change:** Built-in AI parsing (the old `nlp.py` flow) has been removed. The plain-language interaction layer is now the SaltStocks MCP server (see MCP Server item below) — Holly describes the event to Claude in a claude.ai conversation, Claude calls the MCP tools to read current inventory and account data, then she uses the standard entry chooser to record the transaction with context Claude surfaced.
 
-**Acceptance criteria:**
-- System accepts transaction input in free-text / plain-language form
-- Classifies event type: purchase, sale, inventory adjustment, bundle consumption, owner-funded purchase, owner draw/personal use, sample/display, damage/write-off
-- Prompts for missing required context only when necessary
-- Stores both the original user-entered text and the structured interpretation
-- Maps event to accounting treatment and updates inventory accordingly
-- User can review the interpretation before final save
+**For true write-back** (Claude recording the entry directly), that is v2 of the MCP spec — out of scope until the read-only MCP is live and the balance sheet is confirmed accurate.
 
-**Notes:** This is a large feature that likely arrives after the Sprint 1 purchase intake is complete and proven out. Could start with a small set of recognized patterns.
+**Near-term approach:** no code change needed. MCP read tools surface the data; the questionnaire handles the write.
 
 ---
 

@@ -20,72 +20,6 @@
     color: var(--rs-text);
   }
 
-  /* AI card */
-  .ch-ai-card {
-    background: var(--rs-surface);
-    border: 1px solid var(--rs-accent);
-    border-radius: 18px;
-    padding: 20px 24px;
-    margin-bottom: 24px;
-    box-shadow: 0 8px 20px rgba(24, 50, 45, 0.07);
-  }
-  .ch-ai-label {
-    font-size: 0.78rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--rs-accent);
-    margin-bottom: 8px;
-  }
-  .ch-ai-prompt {
-    font-size: 0.95rem;
-    color: var(--rs-muted);
-    margin-bottom: 12px;
-  }
-  .ch-ai-row {
-    display: flex;
-    gap: 10px;
-    align-items: flex-end;
-  }
-  .ch-ai-row textarea {
-    flex: 1;
-    border: 1px solid var(--rs-border);
-    border-radius: 10px;
-    padding: 10px 14px;
-    font-size: 0.95rem;
-    font-family: inherit;
-    color: var(--rs-text);
-    background: #fcfffd;
-    resize: vertical;
-    min-height: 60px;
-    line-height: 1.4;
-  }
-  .ch-ai-row textarea:focus {
-    outline: none;
-    border-color: var(--rs-accent);
-  }
-  .ch-ai-submit {
-    background: var(--rs-accent);
-    color: #f6fffb;
-    border: none;
-    border-radius: 10px;
-    padding: 10px 18px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    align-self: flex-end;
-    transition: background 0.15s;
-  }
-  .ch-ai-submit:hover:not(:disabled) { background: var(--rs-accent-strong); }
-  .ch-ai-submit:disabled { opacity: 0.6; cursor: default; }
-  .ch-ai-settings {
-    font-size: 0.78rem;
-    color: var(--rs-muted);
-    margin-top: 10px;
-  }
-  .ch-ai-settings a { color: var(--rs-accent); }
-
   /* Notice / error banners */
   .ch-notice {
     border-radius: 10px;
@@ -224,12 +158,7 @@
     background: var(--rs-surface-alt, #f5faf7);
   }
 
-  .ch-enable-ai {
-    margin-top: 16px;
-    font-size: 0.8rem;
-    color: var(--rs-muted);
-  }
-  .ch-enable-ai a { color: var(--rs-accent); }
+
 </style>
 {% endblock %}
 
@@ -248,24 +177,6 @@
 
   {# JS-populated notice (hidden until needed) #}
   <div id="ch-notice" class="ch-notice"></div>
-
-  {% if ai_enabled %}
-  <div class="ch-ai-card">
-    <div class="ch-ai-label">✦ AI assist</div>
-    <div class="ch-ai-prompt">Describe what happened and we'll figure out the rest.</div>
-    <form id="ch-ai-form" method="post" action="/accounting/entry/ai-start">
-      <div class="ch-ai-row">
-        <textarea id="ch-ai-text" name="user_text"
-                  placeholder="e.g. Bought 10 Funko Pops for $45 each from eBay, paid with my personal Visa"
-                  rows="2"></textarea>
-        <button id="ch-ai-btn" type="submit" class="ch-ai-submit">→ Parse</button>
-      </div>
-    </form>
-    <div class="ch-ai-settings">
-      <a href="/accounting/settings/ai">AI settings</a>
-    </div>
-  </div>
-  {% endif %}
 
   {# ── Two-card grid ──────────────────────────────────────────────────── #}
   <div class="ch-cards">
@@ -357,77 +268,6 @@
     <a class="ch-other-chip" href="/accounting/entry/start?template_id=OTHER_INCOME">Non-sales income (refund, rebate…)</a>
   </div>
 
-  {% if not ai_enabled %}
-  <div class="ch-enable-ai">
-    <a href="/accounting/settings/ai">Enable AI assist</a>
-    to describe transactions in plain English instead.
-  </div>
-  {% endif %}
 
 </div>
-
-{% if ai_enabled %}
-<script>
-(function () {
-  const form   = document.getElementById('ch-ai-form');
-  const text   = document.getElementById('ch-ai-text');
-  const btn    = document.getElementById('ch-ai-btn');
-  const notice = document.getElementById('ch-notice');
-
-  function showNotice(msg, kind) {
-    notice.innerHTML = msg;
-    notice.className = 'ch-notice ' + kind + ' show';
-  }
-  function clearNotice() {
-    notice.className = 'ch-notice';
-    notice.innerHTML = '';
-  }
-
-  form.addEventListener('submit', async function (e) {
-    e.preventDefault();
-    const desc = text.value.trim();
-    if (!desc) return;
-
-    clearNotice();
-    btn.disabled = true;
-    btn.textContent = '…';
-
-    try {
-      const resp = await fetch('/accounting/entry/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: desc }),
-      });
-
-      const data = await resp.json();
-
-      if (!resp.ok || data.error) {
-        const msg = data.error || 'Unknown error.';
-        if (data.fallback) {
-          showNotice(
-            'AI unavailable: ' + msg + ' — pick a template below to continue manually.',
-            'warn',
-          );
-        } else {
-          showNotice(msg, 'error');
-        }
-        btn.disabled = false;
-        btn.textContent = '→ Parse';
-        return;
-      }
-
-      window.location.href = data.redirect_url;
-
-    } catch (_) {
-      showNotice(
-        'Could not reach the AI service — pick a template below to continue manually.',
-        'warn',
-      );
-      btn.disabled = false;
-      btn.textContent = '→ Parse';
-    }
-  });
-})();
-</script>
-{% endif %}
 {% endblock %}

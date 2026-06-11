@@ -31,37 +31,38 @@
 </div>
 {% endif %}
 
-<div class="card">
-  <form method="post" action="/ebay/import">
-    <div class="row">
-      <div>
-        <label>Start date</label>
-        <input type="date" name="start_date" value="{{ start_date }}" required />
-      </div>
-      <div>
-        <label>End date</label>
-        <input type="date" name="end_date" value="{{ end_date }}" required />
-      </div>
-      <div>
-        <label>Status filter</label>
-        <select name="status_filter">
-          {% for opt in ['PAID','FULFILLED','NOT_STARTED','IN_PROGRESS','COMPLETED','ANY'] %}
-          <option value="{{ opt }}" {{ 'selected' if status_filter == opt else '' }}>{{ opt }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="align-self:end;">
-        <input type="hidden" name="dry_run" value="0" />
-        <label><input type="checkbox" name="dry_run" value="1" {{ 'checked' if dry_run else '' }} /> Dry run / Preview only</label>
-      </div>
-    </div>
-    <p class="muted">Status filtering coming soon; currently imports use date range only.</p>
+{# One form wraps controls + preview so manual_match inputs are submitted together #}
+<form method="post" action="/ebay/import">
 
-    <div style="margin-top:12px; display:flex; gap:8px;">
-      <button class="btn" type="submit" name="action" value="preview">Preview</button>
-      <button class="btn btn-primary" type="submit" name="action" value="apply">Apply deductions</button>
+<div class="card">
+  <div class="row">
+    <div>
+      <label>Start date</label>
+      <input type="date" name="start_date" value="{{ start_date }}" required />
     </div>
-  </form>
+    <div>
+      <label>End date</label>
+      <input type="date" name="end_date" value="{{ end_date }}" required />
+    </div>
+    <div>
+      <label>Status filter</label>
+      <select name="status_filter">
+        {% for opt in ['PAID','FULFILLED','NOT_STARTED','IN_PROGRESS','COMPLETED','ANY'] %}
+        <option value="{{ opt }}" {{ 'selected' if status_filter == opt else '' }}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="align-self:end;">
+      <input type="hidden" name="dry_run" value="0" />
+      <label><input type="checkbox" name="dry_run" value="1" {{ 'checked' if dry_run else '' }} /> Dry run / Preview only</label>
+    </div>
+  </div>
+  <p class="muted">Status filtering coming soon; currently imports use date range only.</p>
+
+  <div style="margin-top:12px; display:flex; gap:8px;">
+    <button class="btn" type="submit" name="action" value="preview">Preview</button>
+    <button class="btn btn-primary" type="submit" name="action" value="apply">Apply deductions</button>
+  </div>
 </div>
 
 {% if summary %}
@@ -71,6 +72,7 @@
     <li>Orders seen: {{ summary.orders_seen }}</li>
     <li>Line items seen: {{ summary.line_items_seen }}</li>
     <li>Matched: {{ summary.matched }}</li>
+    {% if summary.manually_matched %}<li>Manually matched: {{ summary.manually_matched }}</li>{% endif %}
     <li>Unmatched: {{ summary.unmatched }}</li>
     <li>Already imported: {{ summary.already_imported }}</li>
     <li>Oversold/clamped: {{ summary.clamped }}</li>
@@ -82,39 +84,79 @@
 {% if preview_rows %}
 <div class="card">
   <h3>Preview</h3>
+  {% if preview_rows | selectattr("status", "eq", "unmatched") | list %}
+  <p class="muted">For unmatched orders, search your inventory below to manually match before applying.</p>
+  {% endif %}
   <table>
     <thead>
       <tr>
         <th>Order</th>
-        <th>Line Item</th>
         <th>Purchase Date</th>
-        <th>SKU</th>
+        <th>eBay SKU</th>
         <th>Saltstocks Item</th>
-        <th>Qty Sold</th>
-        <th>Current Qty</th>
-        <th>Projected Qty</th>
+        <th>Qty</th>
+        <th>Sale Price</th>
+        <th>Fees</th>
+        <th>Label</th>
+        <th>Net</th>
         <th>Status</th>
       </tr>
     </thead>
     <tbody>
       {% for row in preview_rows %}
       <tr>
-        <td><code>{{ row.order_id }}</code></td>
-        <td><code>{{ row.line_item_id }}</code></td>
-        <td>{{ row.purchase_date or '-' }}</td>
+        <td><code style="font-size:0.8em;">{{ row.order_id }}</code></td>
+        <td>{{ row.purchase_date[:10] if row.purchase_date else '-' }}</td>
         <td>{{ row.sku or '-' }}</td>
         <td>{{ row.item_name or '-' }}</td>
-        <td>{{ "%.2f"|format(row.qty_sold) }}</td>
-        <td>{% if row.current_qty_on_hand is not none %}{{ "%.2f"|format(row.current_qty_on_hand) }}{% else %}-{% endif %}</td>
-        <td>{% if row.projected_qty_on_hand is not none %}{{ "%.2f"|format(row.projected_qty_on_hand) }}{% else %}-{% endif %}</td>
+        <td>{{ "%.0f"|format(row.qty_sold) }}</td>
+        <td>${{ "%.2f"|format(row.sale_price) }}</td>
+        <td>${{ "%.2f"|format(row.transaction_fees) }}</td>
+        <td>
+          {% if row.shipping_cost == 0 %}
+          <span title="Buyer got free shipping — enter what you paid for the label">
+            $<input type="number" step="0.01" min="0" value="0.00"
+                    class="label-override-input"
+                    data-hidden-id="lo-{{ loop.index }}"
+                    data-order-id="{{ row.order_id }}"
+                    data-line-item-id="{{ row.line_item_id }}"
+                    style="width:60px; font-size:0.9em; border:1px solid #d97706; border-radius:4px; padding:2px 4px; color:#92400e;" />
+            <input type="hidden" name="label_override" id="lo-{{ loop.index }}" value="" />
+          </span>
+          {% else %}
+          ${{ "%.2f"|format(row.shipping_cost) }}
+          {% endif %}
+        </td>
+        <td class="row-net-{{ loop.index }}"
+            data-sale-price="{{ row.sale_price }}"
+            data-fees="{{ row.transaction_fees }}"
+            >${{ "%.2f"|format(row.sale_price - row.transaction_fees - row.shipping_cost) }}</td>
         <td>
           {% if row.status == 'matched' %}
             <span class="pill pill-active">matched</span>
+          {% elif row.status == 'manually matched' %}
+            <span class="pill pill-active">manually matched</span>
           {% elif row.status == 'unmatched' %}
-            <span class="pill pill-error">unmatched</span>
-          {% elif row.status == 'already_imported' %}
-            <span class="pill pill-inactive">imported</span>
-          {% elif row.status == 'clamped' %}
+            <div>
+              <span class="pill pill-error">unmatched</span>
+              <div class="item-search-wrap" style="margin-top:6px; position:relative;">
+                <input type="text"
+                       class="item-search-input"
+                       data-hidden-id="mm-{{ loop.index }}"
+                       data-order-id="{{ row.order_id }}"
+                       data-line-item-id="{{ row.line_item_id }}"
+                       placeholder="Search inventory…"
+                       autocomplete="off"
+                       style="width:200px; font-size:0.85em;" />
+                <input type="hidden"
+                       name="manual_match"
+                       id="mm-{{ loop.index }}"
+                       value="" />
+              </div>
+            </div>
+          {% elif row.status == 'already imported' %}
+            <span class="pill pill-inactive">already imported</span>
+          {% elif row.status == 'oversold/clamped' %}
             <span class="pill pill-warn">clamped</span>
           {% else %}
             <span class="pill">{{ row.status }}</span>
@@ -125,38 +167,94 @@
     </tbody>
   </table>
 </div>
-
-<div class="card">
-  <h3>Unmatched (no deduction)</h3>
-  <table>
-    <thead>
-      <tr>
-        <th>Order</th>
-        <th>Line Item</th>
-        <th>SKU</th>
-        <th>Qty Sold</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% set ns = namespace(found=false) %}
-      {% for row in preview_rows %}
-        {% if row.status == 'unmatched' %}
-        {% set ns.found = true %}
-        <tr>
-          <td><code>{{ row.order_id }}</code></td>
-          <td><code>{{ row.line_item_id }}</code></td>
-          <td>{{ row.sku or '-' }}</td>
-          <td>{{ "%.2f"|format(row.qty_sold) }}</td>
-        </tr>
-        {% endif %}
-      {% endfor %}
-      {% if not ns.found %}
-      <tr>
-        <td colspan="4" class="muted">No unmatched line items in this preview.</td>
-      </tr>
-      {% endif %}
-    </tbody>
-  </table>
-</div>
 {% endif %}
+
+</form>
+
+<script>
+(function () {
+  var ITEMS = {{ all_resale_items_for_js | safe }};
+
+  function buildDropdown() {
+    var ul = document.createElement('ul');
+    ul.style.cssText = [
+      'position:absolute', 'top:100%', 'left:0', 'z-index:200',
+      'background:#fff', 'border:1px solid #ccc', 'border-radius:4px',
+      'list-style:none', 'margin:2px 0 0', 'padding:0',
+      'max-height:220px', 'overflow-y:auto', 'min-width:260px',
+      'box-shadow:0 4px 12px rgba(0,0,0,.12)', 'display:none'
+    ].join(';');
+    return ul;
+  }
+
+  function initSearch(input) {
+    var hiddenId  = input.dataset.hiddenId;
+    var orderId   = input.dataset.orderId;
+    var lineId    = input.dataset.lineItemId;
+    var hidden    = document.getElementById(hiddenId);
+    var ul        = buildDropdown();
+    input.parentElement.appendChild(ul);
+
+    function show(matches) {
+      ul.innerHTML = '';
+      matches.forEach(function (it) {
+        var li = document.createElement('li');
+        var label = it.name + (it.sku ? ' — ' + it.sku : '');
+        li.textContent = label;
+        li.style.cssText = 'padding:7px 12px; cursor:pointer; font-size:0.9em;';
+        li.addEventListener('mousedown', function (e) {
+          e.preventDefault();
+          input.value  = label;
+          hidden.value = orderId + '|' + lineId + '|' + it.id;
+          ul.style.display = 'none';
+        });
+        li.addEventListener('mouseover',  function () { li.style.background = '#f4f4f4'; });
+        li.addEventListener('mouseout',   function () { li.style.background = '';        });
+        ul.appendChild(li);
+      });
+      ul.style.display = matches.length ? 'block' : 'none';
+    }
+
+    input.addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      if (!q) { ul.style.display = 'none'; hidden.value = ''; return; }
+      var hits = ITEMS.filter(function (it) {
+        return it.name.toLowerCase().indexOf(q) !== -1 ||
+               it.sku.toLowerCase().indexOf(q)  !== -1;
+      }).slice(0, 10);
+      show(hits);
+    });
+
+    input.addEventListener('blur', function () {
+      setTimeout(function () { ul.style.display = 'none'; }, 150);
+    });
+
+    input.addEventListener('focus', function () {
+      if (this.value.trim()) this.dispatchEvent(new Event('input'));
+    });
+  }
+
+  document.querySelectorAll('.item-search-input').forEach(initSearch);
+
+  // Label cost override — update hidden field and recalculate displayed net
+  document.querySelectorAll('.label-override-input').forEach(function (input) {
+    input.addEventListener('input', function () {
+      var hidden  = document.getElementById(this.dataset.hiddenId);
+      var idx     = this.dataset.hiddenId.replace('lo-', '');
+      var netCell = document.querySelector('.row-net-' + idx);
+      var amt     = parseFloat(this.value) || 0;
+      hidden.value = amt > 0
+        ? this.dataset.orderId + '|' + this.dataset.lineItemId + '|' + amt.toFixed(2)
+        : '';
+      // Update net display (sale_price and fees are baked into data attributes on the cell)
+      if (netCell) {
+        var salePrice = parseFloat(netCell.dataset.salePrice) || 0;
+        var fees      = parseFloat(netCell.dataset.fees)      || 0;
+        netCell.textContent = '$' + Math.max(0, salePrice - fees - amt).toFixed(2);
+      }
+    });
+  });
+
+})();
+</script>
 {% endblock %}
