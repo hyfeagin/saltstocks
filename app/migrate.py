@@ -454,9 +454,11 @@ def migrate():
         # Pre-register claude.ai as a known MCP client.
         # claude.ai skips dynamic registration and uses the hardcoded client_id
         # "claude-ai" with token_endpoint_auth_method=none (public client / PKCE).
+        # INSERT OR REPLACE (not IGNORE) so a previously mis-registered record
+        # with a client_secret gets corrected on the next startup.
         import json as _json
         conn.execute(
-            "INSERT OR IGNORE INTO mcp_oauth_clients (client_id, data) VALUES ('claude-ai', ?)",
+            "INSERT OR REPLACE INTO mcp_oauth_clients (client_id, data) VALUES ('claude-ai', ?)",
             (_json.dumps({
                 "client_id": "claude-ai",
                 "client_id_issued_at": 0,
