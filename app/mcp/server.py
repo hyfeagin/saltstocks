@@ -72,7 +72,11 @@ class SaltStocksOAuthProvider:
 
     def __init__(self, base_url: str):
         from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
-        self._inner = InMemoryOAuthProvider(base_url=base_url)
+        from mcp.server.auth.settings import ClientRegistrationOptions
+        self._inner = InMemoryOAuthProvider(
+            base_url=base_url,
+            client_registration_options=ClientRegistrationOptions(enabled=True),
+        )
         self._load_from_db()
 
     # Delegate attribute access to the inner provider so FastMCP can call
