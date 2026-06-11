@@ -650,6 +650,7 @@ def _resolve_inventory_purchase_context(
                 "allocated_total_cost": allocated_total,
                 "allocated_unit_cost": allocated_unit,
                 "is_lot": inv.is_lot,
+                "fungible": inv.fungible,
             })
             continue
 
@@ -2307,8 +2308,16 @@ def _create_inventory_lot_with_items(
     journal_entry_id: int,
     entry_date: str,
     vendor: Optional[str],
+    fungible: bool = False,
 ) -> int:
-    """Insert one inventory_lots row then N individual items each with qty_on_hand=1.
+    """Insert one inventory_lots row and link item(s) to it.
+
+    fungible=False (default / break-bulk): creates N items each with qty_on_hand=1,
+    named "Lot Name #001", "#002", etc. Used for Lego, comics, anything tracked
+    per individual copy.
+
+    fungible=True: creates one item row with qty_on_hand=N. Used for stress balls,
+    generic lots, anything sold by count without per-unit tracking.
 
     Returns the new lot_id.
     """
@@ -2328,16 +2337,14 @@ def _create_inventory_lot_with_items(
     lot_id = cur.lastrowid
 
     col_names = {r[1] for r in tx_conn.execute("PRAGMA table_info(items)").fetchall()}
-    width = len(str(qty))
 
-    for i in range(1, qty + 1):
-        item_name = f"{lot_name} #{str(i).zfill(width)}"
+    if fungible:
         sku = get_next_sku(tx_conn, _DEFAULT_NEW_RESALE_COMPANY, _DEFAULT_NEW_RESALE_CODE)
         values: dict[str, object] = {
             "item_type": "resale",
             "sku": sku,
-            "name": item_name,
-            "qty_on_hand": 1,
+            "name": lot_name,
+            "qty_on_hand": qty,
             "unit_cost": float(unit_cost),
             "unit": "each",
         }
@@ -2349,13 +2356,39 @@ def _create_inventory_lot_with_items(
             values["brand_code"] = _DEFAULT_NEW_RESALE_CODE
         if "category" in col_names:
             values["category"] = "Collectibles"
-
         cols = ", ".join(values.keys())
         placeholders = ", ".join("?" for _ in values)
         tx_conn.execute(
             f"INSERT INTO items ({cols}) VALUES ({placeholders})",
             tuple(values.values()),
         )
+    else:
+        width = len(str(qty))
+        for i in range(1, qty + 1):
+            item_name = f"{lot_name} #{str(i).zfill(width)}"
+            sku = get_next_sku(tx_conn, _DEFAULT_NEW_RESALE_COMPANY, _DEFAULT_NEW_RESALE_CODE)
+            values = {
+                "item_type": "resale",
+                "sku": sku,
+                "name": item_name,
+                "qty_on_hand": 1,
+                "unit_cost": float(unit_cost),
+                "unit": "each",
+            }
+            if "lot_id" in col_names:
+                values["lot_id"] = lot_id
+            if "company" in col_names:
+                values["company"] = _DEFAULT_NEW_RESALE_COMPANY
+            if "brand_code" in col_names:
+                values["brand_code"] = _DEFAULT_NEW_RESALE_CODE
+            if "category" in col_names:
+                values["category"] = "Collectibles"
+            cols = ", ".join(values.keys())
+            placeholders = ", ".join("?" for _ in values)
+            tx_conn.execute(
+                f"INSERT INTO items ({cols}) VALUES ({placeholders})",
+                tuple(values.values()),
+            )
 
     return lot_id
 
@@ -2367,7 +2400,7 @@ def _apply_lot_purchases(
     entry_date: str,
     vendor: Optional[str],
 ) -> None:
-    """Create inventory_lots rows + individual items for all lot-mode purchase lines."""
+    """Create inventory_lots rows + item(s) for all lot-mode purchase lines."""
     for ctx in lot_contexts:
         _create_inventory_lot_with_items(
             tx_conn,
@@ -2375,6 +2408,7 @@ def _apply_lot_purchases(
             journal_entry_id=journal_entry_id,
             entry_date=entry_date,
             vendor=vendor,
+            fungible=ctx.get("fungible", False),
         )
 
 

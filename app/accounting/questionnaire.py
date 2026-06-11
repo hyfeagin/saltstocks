@@ -529,6 +529,7 @@ def build_answer_set(session: QuestionnaireSession) -> dict:
                     "name": item.get("name"),
                     "quantity": qty,
                     "is_lot": bool(item.get("is_lot", False)),
+                    "fungible": bool(item.get("fungible", False)),
                 },
                 "unit_cost": cost,
                 "quantity": qty,

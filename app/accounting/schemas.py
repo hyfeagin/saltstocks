@@ -24,6 +24,7 @@ class InventoryLink(BaseModel):
     name: Optional[str] = None      # create_new: display name for the new item
     quantity: int = 1
     is_lot: bool = False            # create_new: receive as N individual items each with qty=1
+    fungible: bool = False          # create_new + is_lot: single item row with qty_on_hand=N instead of N rows
 
     @model_validator(mode="after")
     def _check_mode_fields(self) -> InventoryLink:
