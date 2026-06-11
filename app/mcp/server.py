@@ -232,7 +232,7 @@ def create_asgi_app():
     if base_url.strip():
         # OAuth 2.1 mode — set auth on the FastMCP singleton before building
         # the ASGI app so FastMCP wires up the discovery/token endpoints.
-        provider = SaltStocksOAuthProvider(base_url=base_url.rstrip("/"))
+        provider = SaltStocksOAuthProvider(base_url=base_url.rstrip("/") + "/mcp")
         mcp.auth = provider  # type: ignore[assignment]
         return mcp.http_app(path="/", transport="streamable-http")
 
