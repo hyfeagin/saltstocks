@@ -17,11 +17,12 @@ survives server restarts.
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from fastmcp import FastMCP
+from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
 from mcp.server.auth.provider import AccessToken as _SDKAccessToken
 from mcp.server.auth.provider import RefreshToken as _SDKRefreshToken
+from mcp.server.auth.settings import ClientRegistrationOptions
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
 from app.mcp import tools as _tools
@@ -57,32 +58,26 @@ def _get_setting(key: str) -> str | None:
 # Persistent OAuth 2.1 provider
 # ---------------------------------------------------------------------------
 
-class SaltStocksOAuthProvider:
+class SaltStocksOAuthProvider(InMemoryOAuthProvider):
     """
-    Minimal OAuth 2.1 provider backed by SQLite.
+    OAuth 2.1 provider backed by SQLite for persistence across restarts.
 
-    Wraps InMemoryOAuthProvider so all protocol logic lives in FastMCP; this
-    class only adds DB read/write so registered clients and issued tokens
-    survive server restarts.
+    Inherits all protocol logic (including auto-approval in authorize()) from
+    InMemoryOAuthProvider. This class only overrides the write methods to
+    additionally save state to the DB so registered clients and tokens survive
+    server restarts.
 
-    Dynamic client registration is open (required by claude.ai's connector
-    registration flow). Authorization is auto-approved — acceptable for a
-    personal single-user app where the URL is private.
+    Dynamic client registration is enabled (required by claude.ai connector
+    flow). Authorization auto-approves — acceptable for a personal single-user
+    app where the URL is private.
     """
 
     def __init__(self, base_url: str):
-        from fastmcp.server.auth.providers.in_memory import InMemoryOAuthProvider
-        from mcp.server.auth.settings import ClientRegistrationOptions
-        self._inner = InMemoryOAuthProvider(
+        super().__init__(
             base_url=base_url,
             client_registration_options=ClientRegistrationOptions(enabled=True),
         )
         self._load_from_db()
-
-    # Delegate attribute access to the inner provider so FastMCP can call
-    # all the expected OAuthProvider interface methods.
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
 
     # ------------------------------------------------------------------
     # DB persistence helpers
@@ -161,26 +156,29 @@ class SaltStocksOAuthProvider:
             conn.close()
 
     # ------------------------------------------------------------------
-    # OAuthProvider interface overrides (intercept → persist → delegate)
+    # OAuthProvider interface overrides — call super(), then persist to DB
+    # All other methods (authorize, get_client, load_authorization_code,
+    # load_access_token, load_refresh_token, verify_token …) are inherited
+    # from InMemoryOAuthProvider unchanged.
     # ------------------------------------------------------------------
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
-        await self._inner.register_client(client_info)
+        await super().register_client(client_info)
         self._save_client(client_info)
 
     async def exchange_authorization_code(
         self,
         client: OAuthClientInformationFull,
-        authorization_code: Any,
+        authorization_code,
     ) -> OAuthToken:
-        result: OAuthToken = await self._inner.exchange_authorization_code(
+        result: OAuthToken = await super().exchange_authorization_code(
             client, authorization_code
         )
-        access = self._inner.access_tokens.get(result.access_token)
+        access = self.access_tokens.get(result.access_token)
         if access:
             self._save_token(access, "access")
         if result.refresh_token:
-            refresh = self._inner.refresh_tokens.get(result.refresh_token)
+            refresh = self.refresh_tokens.get(result.refresh_token)
             if refresh:
                 self._save_token(refresh, "refresh")
         return result
@@ -188,32 +186,27 @@ class SaltStocksOAuthProvider:
     async def exchange_refresh_token(
         self,
         client: OAuthClientInformationFull,
-        refresh_token: Any,
+        refresh_token,
         scopes: list[str],
     ) -> OAuthToken:
         old_token_str = refresh_token.token
-        result: OAuthToken = await self._inner.exchange_refresh_token(
+        result: OAuthToken = await super().exchange_refresh_token(
             client, refresh_token, scopes
         )
-        # Remove old refresh token from DB (InMemoryOAuthProvider rotates it)
         self._delete_token(old_token_str)
-        new_access = self._inner.access_tokens.get(result.access_token)
+        new_access = self.access_tokens.get(result.access_token)
         if new_access:
             self._save_token(new_access, "access")
         if result.refresh_token:
-            new_refresh = self._inner.refresh_tokens.get(result.refresh_token)
+            new_refresh = self.refresh_tokens.get(result.refresh_token)
             if new_refresh:
                 self._save_token(new_refresh, "refresh")
         return result
 
-    async def revoke_token(self, token: Any) -> None:
+    async def revoke_token(self, token) -> None:
         token_str = token.token
-        await self._inner.revoke_token(token)
+        await super().revoke_token(token)
         self._delete_token(token_str)
-
-    # All other methods (authorize, get_client, load_authorization_code,
-    # load_access_token, load_refresh_token, verify_token …) fall through
-    # to self._inner via __getattr__.
 
 
 # ---------------------------------------------------------------------------
