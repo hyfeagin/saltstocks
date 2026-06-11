@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -18,11 +19,24 @@ from .routers import auth as auth_router
 from .accounting import routes as accounting_routes
 from .mcp.server import create_asgi_app as _create_mcp_app
 
-app = FastAPI(title="Salt Stocks")
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+_mcp_app = _create_mcp_app()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    init_db()
+    migrate()
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    async with _mcp_app.lifespan(app):
+        yield
+
+
+app = FastAPI(title="Salt Stocks", lifespan=_lifespan)
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.mount("/mcp", _create_mcp_app())
+app.mount("/mcp", _mcp_app)
 
 app.include_router(auth_router.router)
 app.include_router(dashboard.router)
@@ -97,15 +111,3 @@ _https_only = os.getenv("SALTSTOCKS_HTTPS_ONLY", "false").lower() == "true"
 app.add_middleware(SessionMiddleware, secret_key=get_session_secret(), https_only=_https_only)
 
 
-# =========================
-# ANCHOR: STARTUP_INIT_DB_BEGIN
-# (Initialize database and backup directory on startup)
-# =========================
-@app.on_event("startup")
-def _startup():
-    init_db()
-    migrate()
-    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-# =========================
-# ANCHOR: STARTUP_INIT_DB_END
-# =========================
