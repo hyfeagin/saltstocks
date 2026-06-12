@@ -556,3 +556,39 @@ def recent_journal_entries(
         })
 
     return {"as_of": _as_of(), "entries": entries}
+
+
+# ── 6. Chart of Accounts ──────────────────────────────────────────────────────
+
+def chart_of_accounts(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute(
+        """
+        SELECT id, code, name, type, subtype
+        FROM accounts
+        WHERE is_active = 1
+        ORDER BY code
+        """
+    ).fetchall()
+
+    # Derive normal balance from account type (DB stores lowercase)
+    _normal = {"asset": "debit", "expense": "debit"}
+
+    by_type: dict[str, list] = {}
+    for r in rows:
+        atype = r["type"]
+        if atype not in by_type:
+            by_type[atype] = []
+        by_type[atype].append({
+            "id": r["id"],
+            "code": r["code"],
+            "name": r["name"],
+            "normal_balance": _normal.get(atype, "credit"),
+        })
+
+    return {
+        "as_of": _as_of(),
+        "accounts_by_type": [
+            {"type": t, "accounts": accts}
+            for t, accts in sorted(by_type.items())
+        ],
+    }

@@ -30,11 +30,19 @@ from app.mcp import tools as _tools
 mcp = FastMCP(
     "SaltStocks Financial Data",
     instructions=(
-        "Read-only access to SaltStocks inventory and accounting data for Geekery Vault. "
-        "Use get_pnl_summary for profitability questions, get_inventory_snapshot for stock "
-        "questions, get_sale_history for trend analysis, simulate_ebay_sale for pricing "
-        "decisions, get_item_detail for a specific SKU, and get_recent_journal_entries "
-        "to review the ledger."
+        "Read and write access to SaltStocks inventory and accounting data for Geekery Vault. "
+        "READ tools — use get_pnl_summary for profitability questions, get_inventory_snapshot "
+        "for stock questions, get_sale_history for trend analysis, simulate_ebay_sale for "
+        "pricing decisions, get_item_detail for a specific SKU, and get_recent_journal_entries "
+        "to review the ledger. "
+        "WRITE tools — to record an expense or payment from a receipt: "
+        "(1) call list_accounts to identify the correct payment_account_code; "
+        "(2) call preview_entry to show the user the exact journal lines that will be posted; "
+        "(3) only after the user confirms, call record_expense to write the entry. "
+        "Never call record_expense without first showing a preview and receiving explicit "
+        "confirmation from the user. "
+        "Inventory purchases and sales (BUY_INVENTORY, SELL_INVENTORY_*) are not supported "
+        "via MCP — direct the user to the SaltStocks web UI for those."
     ),
 )
 

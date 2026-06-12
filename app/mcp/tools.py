@@ -17,6 +17,133 @@ from typing import Literal, Optional
 from fastmcp import FastMCP
 
 
+# Templates that post_entry can write via MCP.
+# Inventory-purchase templates (BUY_INVENTORY, BUY_MATERIALS, SELL_INVENTORY_*,
+# COGS_RECOGNITION, PRODUCTION_RUN) are excluded because they require item-table
+# side effects that must go through the full questionnaire flow.
+_ALLOWED_TEMPLATES = frozenset({
+    "BUSINESS_MEAL",
+    "TRAVEL_HOTEL",
+    "TRAVEL_TRANSPORT",
+    "OFFICE_SUPPLIES",
+    "SOFTWARE_SUBSCRIPTION",
+    "SHIPPING_OUTBOUND",
+    "EBAY_FEES",
+    "PAYMENT_PROCESSING_FEE",
+    "UTILITIES",
+    "RENT",
+    "PROFESSIONAL_SERVICES",
+    "BANK_FEE",
+    "OTHER_EXPENSE",
+    "OTHER_INCOME",
+    "OWNER_CONTRIBUTION",
+    "OWNER_DRAW",
+    "PAY_CREDIT_CARD",
+    "SALES_TAX_REMITTED",
+    "REIMBURSE_OWNER",
+    "BUY_EXPENSE_PERSONAL",
+})
+
+
+def _validate_template_id(template_id: str) -> None:
+    if template_id not in _ALLOWED_TEMPLATES:
+        raise ValueError(
+            f"template_id '{template_id}' is not supported via MCP. "
+            f"Allowed templates: {sorted(_ALLOWED_TEMPLATES)}. "
+            "Inventory purchase/sale templates require the SaltStocks web UI."
+        )
+
+
+def _build_entry_preview(
+    conn,
+    *,
+    template_id: str,
+    entry_date: str,
+    total_amount: str,
+    description: str,
+    payment_account_code: str,
+    vendor=None,
+    expense_category_account_code=None,
+) -> dict:
+    """Resolve journal lines for a template without writing. Returns preview dict."""
+    from datetime import datetime, timezone
+    from decimal import Decimal as _Decimal
+
+    from app.accounting.catalog import resolve_lines
+
+    _validate_template_id(template_id)
+
+    try:
+        amount = _Decimal(total_amount)
+    except Exception:
+        raise ValueError(f"Invalid total_amount '{total_amount}' — must be a decimal number.")
+
+    # Build account_map (code → id) for all accounts
+    rows = conn.execute("SELECT id, code FROM accounts WHERE is_active = 1").fetchall()
+    account_map = {r["code"]: r["id"] for r in rows}
+
+    # Resolve payment account
+    if payment_account_code not in account_map:
+        raise ValueError(
+            f"Account code '{payment_account_code}' not found. "
+            "Call list_accounts to see valid codes."
+        )
+    payment_account_id = account_map[payment_account_code]
+
+    # Resolve optional expense category account
+    expense_category_account_id = None
+    if expense_category_account_code:
+        if expense_category_account_code not in account_map:
+            raise ValueError(
+                f"expense_category_account_code '{expense_category_account_code}' not found."
+            )
+        expense_category_account_id = account_map[expense_category_account_code]
+
+    lines = resolve_lines(
+        template_id,
+        amount,
+        account_map,
+        payment_account_id=payment_account_id,
+        expense_category_account_id=expense_category_account_id,
+    )
+
+    # Build display lines (human-readable) and raw lines (for post_entry)
+    code_to_name = {
+        r["code"]: r["name"]
+        for r in conn.execute("SELECT code, name FROM accounts").fetchall()
+    }
+    id_to_code = {v: k for k, v in account_map.items()}
+
+    display_lines = []
+    raw_lines = []
+    for ln in lines:
+        code = id_to_code.get(ln.account_id, "?")
+        display_lines.append({
+            "account_code": code,
+            "account_name": code_to_name.get(code, ""),
+            "debit": f"{ln.debit:.2f}",
+            "credit": f"{ln.credit:.2f}",
+        })
+        raw_lines.append({
+            "account_id": ln.account_id,
+            "debit": str(ln.debit),
+            "credit": str(ln.credit),
+            "memo": ln.memo,
+        })
+
+    return {
+        "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "template_id": template_id,
+        "entry_date": entry_date,
+        "description": description,
+        "vendor": vendor,
+        "total_amount": f"{amount:.2f}",
+        "lines": display_lines,
+        "lines_raw": raw_lines,
+        "note": "Preview only — nothing has been written.",
+    }
+
+
 def register(mcp: FastMCP) -> None:
     """Attach all six tools to the FastMCP instance."""
 
@@ -174,6 +301,162 @@ def register(mcp: FastMCP) -> None:
             "break_even_price": f"{result['break_even_price']:.2f}",
             "note": "Simulation only — no data written.",
         }
+
+    # ── Tool 7: List Accounts ─────────────────────────────────────────────────
+
+    @mcp.tool(
+        description=(
+            "Returns the SaltStocks chart of accounts grouped by type (Asset, Liability, Equity, "
+            "Revenue, Expense). Each account has an id, code, name, and normal_balance. "
+            "Use this before calling preview_entry or record_expense to look up the correct "
+            "payment_account_code (e.g. Chase Checking = '1010', business credit card = '2010')."
+        )
+    )
+    def list_accounts() -> dict:
+        from app.db import get_conn
+        from app.services import mcp_queries
+        conn = get_conn()
+        try:
+            return mcp_queries.chart_of_accounts(conn)
+        finally:
+            conn.close()
+
+    # ── Tool 8: Preview Entry ─────────────────────────────────────────────────
+
+    @mcp.tool(
+        description=(
+            "Dry-run: shows the exact journal lines that would be posted for a given template "
+            "and amounts WITHOUT writing anything to the database. Use this to confirm the entry "
+            "is correct before calling record_expense. "
+            "template_id must be one of the ALLOWED_EXPENSE_TEMPLATES (call list_accounts first "
+            "to get valid payment account codes). "
+            "Inventory-purchase templates (BUY_INVENTORY, BUY_MATERIALS) are not supported here "
+            "because they have inventory side effects — use the SaltStocks web UI for those."
+        )
+    )
+    def preview_entry(
+        template_id: str,
+        entry_date: str,
+        total_amount: str,
+        description: str,
+        payment_account_code: str,
+        vendor: Optional[str] = None,
+        expense_category_account_code: Optional[str] = None,
+    ) -> dict:
+        """
+        template_id: e.g. 'BUSINESS_MEAL', 'OFFICE_SUPPLIES', 'SOFTWARE_SUBSCRIPTION'.
+        entry_date: ISO date e.g. '2026-06-11'.
+        total_amount: decimal string e.g. '42.50'.
+        payment_account_code: chart-of-accounts code for the payment method (e.g. '1010', '2010').
+        expense_category_account_code: required only for OTHER_EXPENSE template.
+        """
+        from app.db import get_conn
+        conn = get_conn()
+        try:
+            return _build_entry_preview(
+                conn,
+                template_id=template_id,
+                entry_date=entry_date,
+                total_amount=total_amount,
+                description=description,
+                payment_account_code=payment_account_code,
+                vendor=vendor,
+                expense_category_account_code=expense_category_account_code,
+            )
+        finally:
+            conn.close()
+
+    # ── Tool 9: Record Expense ─────────────────────────────────────────────────
+
+    @mcp.tool(
+        description=(
+            "Posts a balanced journal entry to SaltStocks from a receipt or expense. "
+            "This WRITES to the database — always call preview_entry first and confirm with "
+            "the user before calling this. "
+            "Supported templates: BUSINESS_MEAL, TRAVEL_HOTEL, TRAVEL_TRANSPORT, "
+            "OFFICE_SUPPLIES, SOFTWARE_SUBSCRIPTION, SHIPPING_OUTBOUND, EBAY_FEES, "
+            "PAYMENT_PROCESSING_FEE, UTILITIES, RENT, PROFESSIONAL_SERVICES, BANK_FEE, "
+            "OTHER_EXPENSE, OTHER_INCOME, OWNER_CONTRIBUTION, OWNER_DRAW, "
+            "PAY_CREDIT_CARD, SALES_TAX_REMITTED, REIMBURSE_OWNER, BUY_EXPENSE_PERSONAL. "
+            "Returns the new journal entry id and the lines posted."
+        )
+    )
+    def record_expense(
+        template_id: str,
+        entry_date: str,
+        total_amount: str,
+        description: str,
+        payment_account_code: str,
+        vendor: Optional[str] = None,
+        notes: Optional[str] = None,
+        expense_category_account_code: Optional[str] = None,
+    ) -> dict:
+        """
+        template_id: must be one of the supported expense/equity templates.
+        entry_date: ISO date e.g. '2026-06-11'.
+        total_amount: decimal string e.g. '42.50'.
+        payment_account_code: chart-of-accounts code for the payment method (e.g. '1010', '2010').
+        vendor: optional vendor/payee name.
+        notes: optional free-text notes (e.g. receipt number, eBay order id).
+        expense_category_account_code: required only for OTHER_EXPENSE and BUY_EXPENSE_PERSONAL.
+        """
+        from datetime import date as _date
+        from decimal import Decimal as _Decimal
+
+        from app.db import get_conn
+        from app.accounting.posting import PostEntryRequest, post_entry
+
+        _validate_template_id(template_id)
+
+        conn = get_conn()
+        try:
+            preview = _build_entry_preview(
+                conn,
+                template_id=template_id,
+                entry_date=entry_date,
+                total_amount=total_amount,
+                description=description,
+                payment_account_code=payment_account_code,
+                vendor=vendor,
+                expense_category_account_code=expense_category_account_code,
+            )
+
+            from app.accounting.posting import JournalLineInput
+            lines = [
+                JournalLineInput(
+                    account_id=ln["account_id"],
+                    debit=_Decimal(ln["debit"]),
+                    credit=_Decimal(ln["credit"]),
+                    memo=ln.get("memo"),
+                )
+                for ln in preview["lines_raw"]
+            ]
+
+            req = PostEntryRequest(
+                entry_date=_date.fromisoformat(entry_date),
+                description=description,
+                template_id=template_id,
+                total_amount=_Decimal(total_amount),
+                lines=lines,
+                created_by_method="manual",
+                vendor=vendor,
+                notes=notes,
+            )
+
+            entry_id = post_entry(conn, req)
+
+            return {
+                "success": True,
+                "entry_id": entry_id,
+                "template_id": template_id,
+                "entry_date": entry_date,
+                "description": description,
+                "total_amount": f"{_Decimal(total_amount):.2f}",
+                "lines": preview["lines"],
+                "message": f"Journal entry #{entry_id} posted successfully.",
+            }
+        finally:
+            conn.close()
 
     # ── Tool 6: Recent Journal Entries ────────────────────────────────────────
 
