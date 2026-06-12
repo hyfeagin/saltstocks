@@ -574,8 +574,13 @@ def register(mcp: FastMCP) -> None:
                 existing_qty = _Decimal(str(row["qty_on_hand"] or 0))
                 existing_unit_cost = _Decimal(str(row["unit_cost"] or 0))
 
+            # Restock: we know the item_id now, so link the DR line immediately.
+            # New item or lot: item_id is generated in before_insert/after_insert;
+            # we backfill via _after_insert for single items, leave unlinked for lots
+            # (lots use items.lot_id as the cost anchor instead).
+            dr_item_id = existing_item_id  # None for new items / lots
             lines = [
-                JournalLineInput(account_id=inv_account_id, debit=amount),
+                JournalLineInput(account_id=inv_account_id, debit=amount, inventory_item_id=dr_item_id),
                 JournalLineInput(account_id=cr_account_id, credit=amount),
             ]
 
@@ -636,6 +641,19 @@ def register(mcp: FastMCP) -> None:
                     created_items.append({"item_id": iid, "action": "created", "qty": quantity})
 
             def _after_insert(tx_conn, entry_ids):
+                # Backfill inventory_item_id on the DR 1200 line for new single items.
+                # We couldn't set it earlier because the item didn't exist yet.
+                if not create_lot and existing_item_id is None and created_items:
+                    new_iid = created_items[0]["item_id"]
+                    tx_conn.execute(
+                        """
+                        UPDATE journal_lines
+                        SET inventory_item_id = ?
+                        WHERE entry_id = ? AND account_id = ? AND CAST(debit AS REAL) > 0
+                        """,
+                        (new_iid, entry_ids[0], inv_account_id),
+                    )
+
                 if create_lot and existing_item_id is None:
                     from app.accounting.routes import _create_inventory_lot_with_items
                     lid = _create_inventory_lot_with_items(
