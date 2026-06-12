@@ -56,6 +56,29 @@ Stages everything, commits, pushes to current branch.
 
 ---
 
+## VPS Deploy Workflow
+
+**Normal deploy** (code changes only): double-click `shortcuts/Deploy to Server.command`.
+That runs `git pull && systemctl restart saltstocks` — no pip, fast.
+
+**Adding a new Python dependency:**
+1. Add it to `requirements.txt` locally (pinned version)
+2. Commit and push
+3. SSH into the server and install manually:
+   ```bash
+   ssh holly@162.0.222.94
+   cd ~/saltstocks && source .venv/bin/activate
+   pip install <package>==<version>
+   ```
+4. The nightly cron job (2am server time) will keep deps in sync going forward.
+
+**Never add macOS-only packages to requirements.txt** (e.g. `pyobjc`, `pywebview`).
+The server is Linux — those will break the nightly sync.
+
+**bcrypt must stay pinned to 3.2.2.** passlib 1.7.4 is incompatible with bcrypt 4+/5+.
+
+---
+
 ## Session Worklog Protocol
 
 At the start of each session, read `.session/SCRATCH.md` to recover any in-flight work from the previous session.

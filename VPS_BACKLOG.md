@@ -52,10 +52,11 @@
 - [x] Do a dry-run import to confirm the full token → API → import flow works
 
 ### Epic 8 — Deploy Workflow ✅
-- [x] Created `~/deploy.sh` on server: git pull + pip install + systemctl restart
+- [x] Created `~/deploy.sh` on server: git pull + systemctl restart (no pip — fast deploys)
+- [x] Nightly cron job at 2am syncs `requirements.txt` to server venv (`~/sync-deps.sh`)
 - [x] Created `shortcuts/Deploy to Server.command` — double-click to deploy from Mac
 - [x] Created `shortcuts/Pull Production DB.command` — double-click to pull prod DB to local
-- [ ] Test a full round-trip: Mac code change → git push → double-click Deploy → live
+- [x] Created `shortcuts/Push DB to Server.command` — one-time DB migration with confirmation
 
 ### Epic 9 — Security Final Check ✅
 - [x] Confirmed login page is the first thing any browser sees
