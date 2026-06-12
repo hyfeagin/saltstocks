@@ -17,6 +17,5 @@ uvicorn==0.40.0
 requests==2.32.5
 bcrypt==3.2.2
 itsdangerous==2.2.0
-pyobjc-framework-LocalAuthentication==12.2
 pywebview==6.2.1
 fastmcp==3.4.2
