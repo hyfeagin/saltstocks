@@ -86,6 +86,7 @@ class SaltStocksOAuthProvider(InMemoryOAuthProvider):
             client_registration_options=ClientRegistrationOptions(enabled=True),
         )
         self._load_from_db()
+        self._install_static_bearer_token()
 
     # ------------------------------------------------------------------
     # DB persistence helpers
@@ -124,6 +125,26 @@ class SaltStocksOAuthProvider(InMemoryOAuthProvider):
             pass
         finally:
             conn.close()
+
+    def _install_static_bearer_token(self) -> None:
+        """
+        Allow non-OAuth MCP clients to reuse the long-lived personal bearer token.
+
+        Claude continues to use the normal OAuth flow. OpenAI's remote MCP support
+        can send a pre-shared bearer token directly, so we mirror the existing
+        app_settings.mcp_bearer_token into the OAuth provider's access-token map.
+        """
+        token = (_get_setting("mcp_bearer_token") or "").strip()
+        if not token:
+            return
+
+        self.access_tokens[token] = _SDKAccessToken(
+            token=token,
+            client_id="saltstocks-static-bearer",
+            scopes=["read", "write"],
+            expires_at=None,
+            subject="holly",
+        )
 
     def _save_client(self, client: OAuthClientInformationFull) -> None:
         from app.db import get_conn

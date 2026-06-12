@@ -438,5 +438,28 @@ class TestGetRecentJournalEntries(unittest.TestCase):
         _check_no_float(result)
 
 
+class TestSaltStocksOAuthProvider(unittest.TestCase):
+    def test_static_bearer_token_is_available_in_oauth_mode(self):
+        from app.mcp.server import SaltStocksOAuthProvider
+
+        with patch.object(SaltStocksOAuthProvider, "_load_from_db", autospec=True, return_value=None):
+            with patch("app.mcp.server._get_setting", return_value="test-token"):
+                provider = SaltStocksOAuthProvider("https://example.com/mcp")
+
+        self.assertIn("test-token", provider.access_tokens)
+        token = provider.access_tokens["test-token"]
+        self.assertEqual(token.client_id, "saltstocks-static-bearer")
+        self.assertIsNone(token.expires_at)
+
+    def test_blank_static_bearer_token_is_ignored(self):
+        from app.mcp.server import SaltStocksOAuthProvider
+
+        with patch.object(SaltStocksOAuthProvider, "_load_from_db", autospec=True, return_value=None):
+            with patch("app.mcp.server._get_setting", return_value=""):
+                provider = SaltStocksOAuthProvider("https://example.com/mcp")
+
+        self.assertNotIn("", provider.access_tokens)
+
+
 if __name__ == "__main__":
     unittest.main()

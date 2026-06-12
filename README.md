@@ -58,3 +58,8 @@ This is currently a private internal tool. It may later be expanded for Umivera 
 - Configure credentials in UI: `/settings/ebay`.
 - You must manually obtain an eBay OAuth `refresh_token` via eBay Authorization Code Grant flow; this app only performs `refresh_token -> access_token` refresh.
 - Root assumption: Saltstocks `sku` must match eBay listing SKU/Custom Label for automatic matching and deductions.
+
+## MCP access
+- Claude custom connector: set `mcp_base_url` to your public HTTPS app URL so SaltStocks serves OAuth metadata and Claude can register against `https://your-host/mcp`.
+- OpenAI remote MCP: use the same `https://your-host/mcp` server URL and send the existing `app_settings.mcp_bearer_token` as the authorization token.
+- The bearer token remains valid even when OAuth mode is enabled, so OpenAI can connect without changing or breaking the Claude integration.
