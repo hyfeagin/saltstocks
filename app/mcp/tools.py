@@ -17,10 +17,10 @@ from typing import Literal, Optional
 from fastmcp import FastMCP
 
 
-# Templates that post_entry can write via MCP.
-# Inventory-purchase templates (BUY_INVENTORY, BUY_MATERIALS, SELL_INVENTORY_*,
-# COGS_RECOGNITION, PRODUCTION_RUN) are excluded because they require item-table
-# side effects that must go through the full questionnaire flow.
+# Templates allowed for the generic record_expense tool.
+# Inventory/materials purchase templates are handled by record_inventory_purchase instead,
+# which also manages the item-table side effects.
+# SELL_INVENTORY_*, COGS_RECOGNITION, PRODUCTION_RUN stay web-UI only.
 _ALLOWED_TEMPLATES = frozenset({
     "BUSINESS_MEAL",
     "TRAVEL_HOTEL",
@@ -454,6 +454,234 @@ def register(mcp: FastMCP) -> None:
                 "total_amount": f"{_Decimal(total_amount):.2f}",
                 "lines": preview["lines"],
                 "message": f"Journal entry #{entry_id} posted successfully.",
+            }
+        finally:
+            conn.close()
+
+    # ── Tool 10: Record Inventory / Materials Purchase ────────────────────────
+
+    @mcp.tool(
+        description=(
+            "Records an inventory or materials purchase: posts the journal entry AND creates "
+            "or updates the item record(s) in one atomic operation. "
+            "Set item_type='resale' for resale inventory, 'material' for production materials. "
+            "Set use_personal_funds=True when you paid out of pocket (offsets to Owner Contributions). "
+            "Set create_lot=True for lot purchases (e.g. a Goodwill lot, a wholesale box). "
+            "When create_lot=True: fungible=True creates one item row with qty=N (stress balls, "
+            "generic stock); fungible=False creates N individual item rows with qty=1 each "
+            "(comics, Lego sets — for per-unit tracking). "
+            "Set existing_item_id to restock an item already in inventory (triggers WAC recalc). "
+            "Always call preview_inventory_purchase first and confirm with the user before writing."
+        )
+    )
+    def record_inventory_purchase(
+        entry_date: str,
+        total_amount: str,
+        description: str,
+        item_name: str,
+        quantity: int,
+        item_type: str = "resale",
+        vendor: Optional[str] = None,
+        notes: Optional[str] = None,
+        payment_account_code: Optional[str] = None,
+        use_personal_funds: bool = False,
+        create_lot: bool = False,
+        fungible: bool = True,
+        existing_item_id: Optional[int] = None,
+        category: Optional[str] = None,
+    ) -> dict:
+        """
+        entry_date: ISO date e.g. '2026-06-11'.
+        total_amount: total paid for all units e.g. '25.00'.
+        item_name: name for the new item / lot.
+        quantity: number of units purchased.
+        item_type: 'resale' or 'material'.
+        payment_account_code: account code for payment method e.g. '1020'. Required unless use_personal_funds=True.
+        use_personal_funds: if True, offsets to account 3100 (Owner Contributions).
+        create_lot: True for lot purchases — creates an inventory_lots record.
+        fungible: used only when create_lot=True. True = single item with qty=N; False = N items with qty=1.
+        existing_item_id: integer id of an existing item to restock (WAC is recalculated).
+        category: optional item category label.
+        """
+        from datetime import date as _date
+        from decimal import Decimal as _Decimal
+
+        from app.db import get_conn
+        from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entries
+
+        # Validate
+        if not use_personal_funds and not payment_account_code:
+            raise ValueError(
+                "Provide payment_account_code (e.g. '1020') or set use_personal_funds=True."
+            )
+        if item_type not in ("resale", "material"):
+            raise ValueError("item_type must be 'resale' or 'material'.")
+        if quantity < 1:
+            raise ValueError("quantity must be at least 1.")
+        if create_lot and fungible is False and quantity > 200:
+            raise ValueError(
+                "fungible=False would create more than 200 individual item rows. "
+                "Use fungible=True for large fungible lots, or break into smaller batches."
+            )
+
+        try:
+            amount = _Decimal(total_amount)
+        except Exception:
+            raise ValueError(f"Invalid total_amount '{total_amount}'.")
+
+        unit_cost = (amount / _Decimal(quantity)).quantize(_Decimal("0.0001"))
+
+        # Pick template
+        if item_type == "material":
+            template_id = "BUY_MATERIALS_PERSONAL" if use_personal_funds else "BUY_MATERIALS"
+        else:
+            template_id = "BUY_INVENTORY_PERSONAL" if use_personal_funds else "BUY_INVENTORY"
+
+        conn = get_conn()
+        try:
+            # Resolve account map
+            rows = conn.execute(
+                "SELECT id, code FROM accounts WHERE is_active = 1"
+            ).fetchall()
+            account_map = {r["code"]: r["id"] for r in rows}
+
+            inv_account_id = account_map.get("1200")
+            if not inv_account_id:
+                raise ValueError("Account 1200 (Inventory) not found in chart of accounts.")
+
+            if use_personal_funds:
+                cr_account_id = account_map.get("3100")
+                if not cr_account_id:
+                    raise ValueError("Account 3100 (Owner Contributions) not found.")
+            else:
+                if payment_account_code not in account_map:
+                    raise ValueError(
+                        f"Account code '{payment_account_code}' not found. "
+                        "Call list_accounts to see valid codes."
+                    )
+                cr_account_id = account_map[payment_account_code]
+
+            # Resolve existing item info for WAC (if restocking)
+            existing_qty = _Decimal("0")
+            existing_unit_cost = _Decimal("0")
+            if existing_item_id is not None:
+                row = conn.execute(
+                    "SELECT qty_on_hand, unit_cost FROM items WHERE id = ?",
+                    (existing_item_id,),
+                ).fetchone()
+                if row is None:
+                    raise ValueError(f"Item id={existing_item_id} not found.")
+                existing_qty = _Decimal(str(row["qty_on_hand"] or 0))
+                existing_unit_cost = _Decimal(str(row["unit_cost"] or 0))
+
+            lines = [
+                JournalLineInput(account_id=inv_account_id, debit=amount),
+                JournalLineInput(account_id=cr_account_id, credit=amount),
+            ]
+
+            req = PostEntryRequest(
+                entry_date=_date.fromisoformat(entry_date),
+                description=description,
+                template_id=template_id,
+                total_amount=amount,
+                lines=lines,
+                created_by_method="manual",
+                vendor=vendor,
+                notes=notes,
+            )
+
+            # Build the item-side-effect callbacks
+            lot_ctx = {
+                "quantity": quantity,
+                "allocated_unit_cost": unit_cost,
+                "item_name": item_name,
+                "fungible": fungible,
+            }
+
+            created_items: list[dict] = []
+            created_lot_id: list[int] = []  # mutable container for after_insert closure
+
+            def _before_insert(tx_conn):
+                if existing_item_id is not None:
+                    # Restock: WAC recalculation
+                    new_qty = existing_qty + _Decimal(quantity)
+                    new_unit_cost = (
+                        (existing_qty * existing_unit_cost + _Decimal(quantity) * unit_cost)
+                        / new_qty
+                    ).quantize(_Decimal("0.0001"))
+                    tx_conn.execute(
+                        "UPDATE items SET qty_on_hand=?, unit_cost=? WHERE id=?",
+                        (float(new_qty), float(new_unit_cost), existing_item_id),
+                    )
+                    created_items.append({
+                        "item_id": existing_item_id,
+                        "action": "restocked",
+                        "new_qty": str(new_qty),
+                        "new_unit_cost": str(new_unit_cost.quantize(_Decimal("0.01"))),
+                    })
+                elif not create_lot:
+                    # Single new item
+                    from app.accounting.routes import _insert_new_inventory_purchase_item
+                    iid = _insert_new_inventory_purchase_item(
+                        tx_conn,
+                        name=item_name,
+                        quantity=quantity,
+                        unit_cost=unit_cost,
+                        item_type=item_type,
+                    )
+                    if category:
+                        tx_conn.execute(
+                            "UPDATE items SET category=? WHERE id=?", (category, iid)
+                        )
+                    created_items.append({"item_id": iid, "action": "created", "qty": quantity})
+
+            def _after_insert(tx_conn, entry_ids):
+                if create_lot and existing_item_id is None:
+                    from app.accounting.routes import _create_inventory_lot_with_items
+                    lid = _create_inventory_lot_with_items(
+                        tx_conn,
+                        ctx=lot_ctx,
+                        journal_entry_id=entry_ids[0],
+                        entry_date=entry_date,
+                        vendor=vendor,
+                        fungible=fungible,
+                    )
+                    if category:
+                        tx_conn.execute(
+                            "UPDATE items SET category=? WHERE lot_id=?", (category, lid)
+                        )
+                    created_lot_id.append(lid)
+                    n_items = tx_conn.execute(
+                        "SELECT COUNT(*) AS c FROM items WHERE lot_id=?", (lid,)
+                    ).fetchone()["c"]
+                    created_items.append({
+                        "lot_id": lid,
+                        "action": "lot_created",
+                        "items_created": n_items,
+                    })
+
+            entry_ids = post_entries(
+                conn, [req],
+                before_insert=_before_insert,
+                after_insert=_after_insert,
+            )
+
+            from datetime import datetime, timezone
+            return {
+                "success": True,
+                "entry_id": entry_ids[0],
+                "template_id": template_id,
+                "entry_date": entry_date,
+                "description": description,
+                "vendor": vendor,
+                "total_amount": f"{amount:.2f}",
+                "unit_cost": f"{unit_cost:.4f}",
+                "quantity": quantity,
+                "item_type": item_type,
+                "inventory_changes": created_items,
+                **({"lot_id": created_lot_id[0]} if created_lot_id else {}),
+                "message": f"Journal entry #{entry_ids[0]} posted and inventory updated.",
+                "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
         finally:
             conn.close()
