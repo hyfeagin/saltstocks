@@ -704,6 +704,229 @@ def register(mcp: FastMCP) -> None:
         finally:
             conn.close()
 
+    # ── Tool 11: Record Sale ──────────────────────────────────────────────────
+
+    @mcp.tool(
+        description=(
+            "Records the sale of an inventory item: posts the revenue journal entry AND the "
+            "auto-COGS entry, then decrements qty_on_hand (and lot qty_remaining if applicable) "
+            "— all in one atomic transaction. "
+            "sale_channel='cash' for in-person/card sales; 'ebay' for eBay orders. "
+            "For eBay: sale_price is the item price the buyer paid (not including shipping); "
+            "ebay_fees is the combined eBay fee; shipping_charged is what the buyer paid for "
+            "shipping (added to gross revenue). "
+            "For cash: sales_tax is split into a separate Sales Tax Payable credit if > 0. "
+            "Always show the user what will be posted (call get_item_detail first to confirm "
+            "unit_cost and qty) and get confirmation before calling this."
+        )
+    )
+    def record_sale(
+        item_id: int,
+        entry_date: str,
+        sale_price: str,
+        payment_account_code: str,
+        quantity: int = 1,
+        sale_channel: str = "cash",
+        sales_tax: str = "0",
+        ebay_fees: str = "0",
+        shipping_charged: str = "0",
+        description: Optional[str] = None,
+        vendor: Optional[str] = None,
+        notes: Optional[str] = None,
+    ) -> dict:
+        """
+        item_id: integer id of the item being sold.
+        entry_date: ISO date e.g. '2026-06-12'.
+        sale_price: what the buyer paid for the item (not including shipping) e.g. '29.99'.
+        payment_account_code: where the money lands e.g. '1020' (bank) or '1010' (cash).
+        quantity: units sold (default 1).
+        sale_channel: 'cash' or 'ebay'.
+        sales_tax: cash sales only — tax collected e.g. '2.47'.
+        ebay_fees: eBay sales only — combined fee amount e.g. '4.20'.
+        shipping_charged: eBay sales only — shipping the buyer paid e.g. '5.00'.
+        """
+        from datetime import date as _date, datetime, timezone
+        from decimal import Decimal as _Decimal
+
+        from app.db import get_conn
+        from app.accounting.catalog import resolve_lines
+        from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entries
+
+        if sale_channel not in ("cash", "ebay"):
+            raise ValueError("sale_channel must be 'cash' or 'ebay'.")
+        if quantity < 1:
+            raise ValueError("quantity must be at least 1.")
+
+        try:
+            price = _Decimal(sale_price)
+            tax = _Decimal(sales_tax)
+            fees = _Decimal(ebay_fees)
+            shipping = _Decimal(shipping_charged)
+        except Exception:
+            raise ValueError("Monetary values must be decimal numbers e.g. '29.99'.")
+
+        conn = get_conn()
+        try:
+            # Resolve item
+            item = conn.execute(
+                "SELECT id, name, qty_on_hand, unit_cost, lot_id, item_type FROM items WHERE id = ?",
+                (item_id,),
+            ).fetchone()
+            if item is None:
+                raise ValueError(f"Item id={item_id} not found.")
+            if item["item_type"] != "resale":
+                raise ValueError(
+                    f"Item {item_id} is a material, not a resale item. Only resale items can be sold."
+                )
+
+            qty_on_hand = _Decimal(str(item["qty_on_hand"] or 0))
+            if qty_on_hand <= 0:
+                raise ValueError(f"Item '{item['name']}' has no qty on hand.")
+            if _Decimal(quantity) > qty_on_hand:
+                raise ValueError(
+                    f"Cannot sell {quantity} — only {qty_on_hand} of '{item['name']}' on hand."
+                )
+
+            unit_cost = _Decimal(str(item["unit_cost"] or 0)).quantize(_Decimal("0.01"))
+            cogs_amount = (unit_cost * _Decimal(quantity)).quantize(_Decimal("0.01"))
+
+            # Account map
+            acct_rows = conn.execute("SELECT id, code, name FROM accounts").fetchall()
+            account_map = {r["code"]: r["id"] for r in acct_rows}
+            id_to_name = {r["id"]: r["name"] for r in acct_rows}
+            id_to_code = {r["id"]: r["code"] for r in acct_rows}
+
+            if payment_account_code not in account_map:
+                raise ValueError(
+                    f"Account code '{payment_account_code}' not found. "
+                    "Call list_accounts to see valid codes."
+                )
+            payment_account_id = account_map[payment_account_code]
+
+            # Template and total_amount
+            if sale_channel == "ebay":
+                template_id = "SELL_INVENTORY_EBAY"
+                gross_revenue = (price + shipping).quantize(_Decimal("0.01"))
+                total_amount = price  # resolve_lines adds shipping internally
+            else:
+                template_id = "SELL_INVENTORY_CASH"
+                gross_revenue = price
+                total_amount = price
+
+            item_desc = description or f"Sold {item['name']}"
+
+            # Revenue lines
+            revenue_lines = resolve_lines(
+                template_id,
+                total_amount,
+                account_map,
+                payment_account_id=payment_account_id,
+                sales_tax_amount=tax if sale_channel == "cash" else None,
+                ebay_fees_amount=fees if sale_channel == "ebay" else None,
+                ebay_shipping_charged=shipping if sale_channel == "ebay" else None,
+                inventory_item_id=item_id,
+            )
+
+            # COGS lines
+            cogs_lines = [
+                JournalLineInput(
+                    account_id=account_map["5000"],
+                    debit=cogs_amount,
+                    memo="Auto COGS",
+                    inventory_item_id=item_id,
+                ),
+                JournalLineInput(
+                    account_id=account_map["1200"],
+                    credit=cogs_amount,
+                    memo="Auto COGS",
+                    inventory_item_id=item_id,
+                ),
+            ]
+
+            revenue_req = PostEntryRequest(
+                entry_date=_date.fromisoformat(entry_date),
+                description=item_desc,
+                template_id=template_id,
+                total_amount=gross_revenue,
+                lines=revenue_lines,
+                created_by_method="manual",
+                vendor=vendor,
+                notes=notes,
+            )
+
+            cogs_req = PostEntryRequest(
+                entry_date=_date.fromisoformat(entry_date),
+                description=f"Auto COGS — {item_desc}",
+                template_id="COGS_RECOGNITION",
+                total_amount=cogs_amount,
+                lines=cogs_lines,
+                created_by_method="system_auto",
+                vendor=vendor,
+                notes=notes,
+            )
+
+            def _after_sale_insert(tx_conn, _entry_ids):
+                tx_conn.execute(
+                    "UPDATE items SET qty_on_hand = qty_on_hand - ? WHERE id = ?",
+                    (float(quantity), item_id),
+                )
+                if item["lot_id"] is not None:
+                    tx_conn.execute(
+                        """
+                        UPDATE inventory_lots
+                        SET qty_remaining = MAX(0, qty_remaining - ?)
+                        WHERE id = ?
+                        """,
+                        (float(quantity), item["lot_id"]),
+                    )
+
+            entry_ids = post_entries(
+                conn, [revenue_req, cogs_req],
+                after_insert=_after_sale_insert,
+            )
+
+            # Build human-readable line summary
+            def _fmt_lines(req):
+                out = []
+                for ln in req.lines:
+                    code = id_to_code.get(ln.account_id, "?")
+                    out.append({
+                        "account_code": code,
+                        "account_name": id_to_name.get(ln.account_id, ""),
+                        "debit": f"{ln.debit:.2f}",
+                        "credit": f"{ln.credit:.2f}",
+                    })
+                return out
+
+            net_profit = (gross_revenue - (tax if sale_channel == "cash" else _Decimal("0")) - fees - cogs_amount).quantize(_Decimal("0.01"))
+
+            return {
+                "success": True,
+                "revenue_entry_id": entry_ids[0],
+                "cogs_entry_id": entry_ids[1],
+                "item_id": item_id,
+                "item_name": item["name"],
+                "entry_date": entry_date,
+                "sale_channel": sale_channel,
+                "sale_price": f"{price:.2f}",
+                "gross_revenue": f"{gross_revenue:.2f}",
+                **({"ebay_fees": f"{fees:.2f}", "shipping_charged": f"{shipping:.2f}"} if sale_channel == "ebay" else {}),
+                **({"sales_tax": f"{tax:.2f}"} if sale_channel == "cash" and tax > 0 else {}),
+                "cogs": f"{cogs_amount:.2f}",
+                "net_profit": f"{net_profit:.2f}",
+                "qty_remaining": f"{qty_on_hand - _Decimal(quantity):.0f}",
+                "revenue_lines": _fmt_lines(revenue_req),
+                "cogs_lines": _fmt_lines(cogs_req),
+                "message": (
+                    f"Sale recorded: revenue entry #{entry_ids[0]}, "
+                    f"COGS entry #{entry_ids[1]}. "
+                    f"qty_on_hand for '{item['name']}' is now {qty_on_hand - _Decimal(quantity):.0f}."
+                ),
+                "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+        finally:
+            conn.close()
+
     # ── Tool 6: Recent Journal Entries ────────────────────────────────────────
 
     @mcp.tool(

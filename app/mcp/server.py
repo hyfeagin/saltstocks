@@ -47,7 +47,12 @@ mcp = FastMCP(
         "record_inventory_purchase handles both resale inventory (item_type='resale') and "
         "production materials (item_type='material'), fungible lots, break-bulk lots, and "
         "restocking existing items with WAC recalculation. "
-        "Sales (SELL_INVENTORY_*) are web-UI only — do not attempt to record them via MCP."
+        "For sales (cash/in-person or eBay): call get_item_detail first to confirm unit_cost "
+        "and qty_on_hand, summarize what will be posted (revenue entry + auto-COGS entry + "
+        "qty decrement), get confirmation, then call record_sale. "
+        "record_sale handles cash sales (with optional sales tax split) and eBay sales "
+        "(with fees and buyer-paid shipping). It posts both the revenue entry and the "
+        "COGS recognition entry atomically and decrements qty_on_hand."
     ),
 )
 
