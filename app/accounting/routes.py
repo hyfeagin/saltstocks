@@ -2698,3 +2698,36 @@ def entry_confirm(
         url=f"/accounting/entries/{entry_id}",
         status_code=303,
     )
+
+
+# ── MCP Staged-Write Review ───────────────────────────────────────────────────
+
+@router.get("/mcp-review", response_class=HTMLResponse)
+def mcp_review(request: Request, conn: sqlite3.Connection = Depends(get_db)):
+    from app.mcp.staging import get_pending_writes
+    pending = get_pending_writes(conn)
+    return render("accounting/mcp_review.html", request, pending=pending)
+
+
+@router.post("/mcp-review/{pending_id}/approve")
+def mcp_approve(pending_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    from app.mcp.staging import approve_write
+    try:
+        result = approve_write(pending_id)
+        return JSONResponse({"ok": True, "result": result})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=200)
+
+
+@router.post("/mcp-review/{pending_id}/reject")
+def mcp_reject(pending_id: int, conn: sqlite3.Connection = Depends(get_db)):
+    from app.mcp.staging import reject_write
+    reject_write(conn, pending_id)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/mcp-review/cleanup")
+def mcp_cleanup(conn: sqlite3.Connection = Depends(get_db)):
+    from app.mcp.staging import cleanup_completed
+    cleanup_completed(conn)
+    return RedirectResponse(url="/", status_code=303)

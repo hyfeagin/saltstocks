@@ -625,6 +625,20 @@ def migrate():
             )
             """)
 
+        # ── MCP Staged Writes ─────────────────────────────────────────────────
+        if not table_exists(conn, "mcp_pending_writes"):
+            conn.execute("""
+            CREATE TABLE mcp_pending_writes (
+              id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+              tool_name     TEXT NOT NULL,
+              params_json   TEXT NOT NULL,
+              preview_json  TEXT NOT NULL,
+              human_summary TEXT NOT NULL,
+              status        TEXT NOT NULL DEFAULT 'pending'
+            )
+            """)
+
     conn.close()
     print("Migration complete.")
 

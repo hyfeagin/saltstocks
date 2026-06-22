@@ -144,6 +144,390 @@ def _build_entry_preview(
     }
 
 
+# ── Module-level execute functions (called by staging.py on approve) ─────────
+# These are the real write implementations. The public MCP tools (below) queue
+# to staging instead; these fire only when Holly clicks Approve in the review UI.
+
+def _execute_record_expense(params: dict) -> dict:
+    from datetime import date as _date
+    from decimal import Decimal as _Decimal
+    from app.db import get_conn
+    from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entry
+
+    template_id = params["template_id"]
+    entry_date = params["entry_date"]
+    total_amount = params["total_amount"]
+    description = params["description"]
+    payment_account_code = params["payment_account_code"]
+    vendor = params.get("vendor")
+    notes = params.get("notes")
+    expense_category_account_code = params.get("expense_category_account_code")
+
+    _validate_template_id(template_id)
+    conn = get_conn()
+    try:
+        preview = _build_entry_preview(
+            conn,
+            template_id=template_id,
+            entry_date=entry_date,
+            total_amount=total_amount,
+            description=description,
+            payment_account_code=payment_account_code,
+            vendor=vendor,
+            expense_category_account_code=expense_category_account_code,
+        )
+        lines = [
+            JournalLineInput(
+                account_id=ln["account_id"],
+                debit=_Decimal(ln["debit"]),
+                credit=_Decimal(ln["credit"]),
+                memo=ln.get("memo"),
+            )
+            for ln in preview["lines_raw"]
+        ]
+        req = PostEntryRequest(
+            entry_date=_date.fromisoformat(entry_date),
+            description=description,
+            template_id=template_id,
+            total_amount=_Decimal(total_amount),
+            lines=lines,
+            created_by_method="manual",
+            vendor=vendor,
+            notes=notes,
+        )
+        entry_id = post_entry(conn, req)
+        return {
+            "success": True,
+            "entry_id": entry_id,
+            "template_id": template_id,
+            "entry_date": entry_date,
+            "description": description,
+            "total_amount": f"{_Decimal(total_amount):.2f}",
+            "lines": preview["lines"],
+            "message": f"Journal entry #{entry_id} posted successfully.",
+        }
+    finally:
+        conn.close()
+
+
+def _execute_record_inventory_purchase(params: dict) -> dict:
+    from datetime import date as _date, datetime, timezone
+    from decimal import Decimal as _Decimal
+    from app.db import get_conn
+    from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entries
+
+    entry_date = params["entry_date"]
+    total_amount = params["total_amount"]
+    description = params["description"]
+    item_name = params["item_name"]
+    quantity = params["quantity"]
+    item_type = params.get("item_type", "resale")
+    vendor = params.get("vendor")
+    notes = params.get("notes")
+    payment_account_code = params.get("payment_account_code")
+    use_personal_funds = params.get("use_personal_funds", False)
+    create_lot = params.get("create_lot", False)
+    fungible = params.get("fungible", True)
+    existing_item_id = params.get("existing_item_id")
+    category = params.get("category")
+
+    if not use_personal_funds and not payment_account_code:
+        raise ValueError("Provide payment_account_code or set use_personal_funds=True.")
+    if item_type not in ("resale", "material"):
+        raise ValueError("item_type must be 'resale' or 'material'.")
+    if quantity < 1:
+        raise ValueError("quantity must be at least 1.")
+    if create_lot and fungible is False and quantity > 200:
+        raise ValueError("fungible=False would create more than 200 individual item rows.")
+
+    try:
+        amount = _Decimal(total_amount)
+    except Exception:
+        raise ValueError(f"Invalid total_amount '{total_amount}'.")
+
+    unit_cost = (amount / _Decimal(quantity)).quantize(_Decimal("0.0001"))
+
+    if item_type == "material":
+        template_id = "BUY_MATERIALS_PERSONAL" if use_personal_funds else "BUY_MATERIALS"
+    else:
+        template_id = "BUY_INVENTORY_PERSONAL" if use_personal_funds else "BUY_INVENTORY"
+
+    conn = get_conn()
+    try:
+        rows = conn.execute("SELECT id, code FROM accounts WHERE is_active = 1").fetchall()
+        account_map = {r["code"]: r["id"] for r in rows}
+
+        inv_account_id = account_map.get("1200")
+        if not inv_account_id:
+            raise ValueError("Account 1200 (Inventory) not found.")
+
+        if use_personal_funds:
+            cr_account_id = account_map.get("3100")
+            if not cr_account_id:
+                raise ValueError("Account 3100 (Owner Contributions) not found.")
+        else:
+            if payment_account_code not in account_map:
+                raise ValueError(f"Account code '{payment_account_code}' not found.")
+            cr_account_id = account_map[payment_account_code]
+
+        existing_qty = _Decimal("0")
+        existing_unit_cost = _Decimal("0")
+        if existing_item_id is not None:
+            row = conn.execute(
+                "SELECT qty_on_hand, unit_cost FROM items WHERE id = ?", (existing_item_id,)
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"Item id={existing_item_id} not found.")
+            existing_qty = _Decimal(str(row["qty_on_hand"] or 0))
+            existing_unit_cost = _Decimal(str(row["unit_cost"] or 0))
+
+        dr_item_id = existing_item_id
+        lines = [
+            JournalLineInput(account_id=inv_account_id, debit=amount, inventory_item_id=dr_item_id),
+            JournalLineInput(account_id=cr_account_id, credit=amount),
+        ]
+        req = PostEntryRequest(
+            entry_date=_date.fromisoformat(entry_date),
+            description=description,
+            template_id=template_id,
+            total_amount=amount,
+            lines=lines,
+            created_by_method="manual",
+            vendor=vendor,
+            notes=notes,
+        )
+        lot_ctx = {
+            "quantity": quantity,
+            "allocated_unit_cost": unit_cost,
+            "item_name": item_name,
+            "fungible": fungible,
+        }
+        created_items: list[dict] = []
+        created_lot_id: list[int] = []
+
+        def _before_insert(tx_conn):
+            if existing_item_id is not None:
+                new_qty = existing_qty + _Decimal(quantity)
+                new_unit_cost = (
+                    (existing_qty * existing_unit_cost + _Decimal(quantity) * unit_cost) / new_qty
+                ).quantize(_Decimal("0.0001"))
+                tx_conn.execute(
+                    "UPDATE items SET qty_on_hand=?, unit_cost=? WHERE id=?",
+                    (float(new_qty), float(new_unit_cost), existing_item_id),
+                )
+                created_items.append({
+                    "item_id": existing_item_id,
+                    "action": "restocked",
+                    "new_qty": str(new_qty),
+                    "new_unit_cost": str(new_unit_cost.quantize(_Decimal("0.01"))),
+                })
+            elif not create_lot:
+                from app.accounting.routes import _insert_new_inventory_purchase_item
+                iid = _insert_new_inventory_purchase_item(
+                    tx_conn, name=item_name, quantity=quantity,
+                    unit_cost=unit_cost, item_type=item_type,
+                )
+                if category:
+                    tx_conn.execute("UPDATE items SET category=? WHERE id=?", (category, iid))
+                created_items.append({"item_id": iid, "action": "created", "qty": quantity})
+
+        def _after_insert(tx_conn, entry_ids):
+            if not create_lot and existing_item_id is None and created_items:
+                new_iid = created_items[0]["item_id"]
+                tx_conn.execute(
+                    """UPDATE journal_lines SET inventory_item_id=?
+                       WHERE entry_id=? AND account_id=? AND CAST(debit AS REAL) > 0""",
+                    (new_iid, entry_ids[0], inv_account_id),
+                )
+            if create_lot and existing_item_id is None:
+                from app.accounting.routes import _create_inventory_lot_with_items
+                lid = _create_inventory_lot_with_items(
+                    tx_conn, ctx=lot_ctx, journal_entry_id=entry_ids[0],
+                    entry_date=entry_date, vendor=vendor, fungible=fungible,
+                )
+                if category:
+                    tx_conn.execute("UPDATE items SET category=? WHERE lot_id=?", (category, lid))
+                created_lot_id.append(lid)
+                n_items = tx_conn.execute(
+                    "SELECT COUNT(*) AS c FROM items WHERE lot_id=?", (lid,)
+                ).fetchone()["c"]
+                created_items.append({"lot_id": lid, "action": "lot_created", "items_created": n_items})
+
+        entry_ids = post_entries(conn, [req], before_insert=_before_insert, after_insert=_after_insert)
+
+        return {
+            "success": True,
+            "entry_id": entry_ids[0],
+            "template_id": template_id,
+            "entry_date": entry_date,
+            "description": description,
+            "vendor": vendor,
+            "total_amount": f"{amount:.2f}",
+            "unit_cost": f"{unit_cost:.4f}",
+            "quantity": quantity,
+            "item_type": item_type,
+            "inventory_changes": created_items,
+            **({"lot_id": created_lot_id[0]} if created_lot_id else {}),
+            "message": f"Journal entry #{entry_ids[0]} posted and inventory updated.",
+            "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    finally:
+        conn.close()
+
+
+def _execute_record_sale(params: dict) -> dict:
+    from datetime import date as _date, datetime, timezone
+    from decimal import Decimal as _Decimal
+    from app.db import get_conn
+    from app.accounting.catalog import resolve_lines
+    from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entries
+
+    item_id = params["item_id"]
+    entry_date = params["entry_date"]
+    sale_price = params["sale_price"]
+    payment_account_code = params["payment_account_code"]
+    quantity = params.get("quantity", 1)
+    sale_channel = params.get("sale_channel", "cash")
+    sales_tax = params.get("sales_tax", "0")
+    ebay_fees = params.get("ebay_fees", "0")
+    shipping_charged = params.get("shipping_charged", "0")
+    description = params.get("description")
+    vendor = params.get("vendor")
+    notes = params.get("notes")
+
+    if sale_channel not in ("cash", "ebay"):
+        raise ValueError("sale_channel must be 'cash' or 'ebay'.")
+    if quantity < 1:
+        raise ValueError("quantity must be at least 1.")
+
+    try:
+        price = _Decimal(sale_price)
+        tax = _Decimal(sales_tax)
+        fees = _Decimal(ebay_fees)
+        shipping = _Decimal(shipping_charged)
+    except Exception:
+        raise ValueError("Monetary values must be decimal numbers e.g. '29.99'.")
+
+    conn = get_conn()
+    try:
+        item = conn.execute(
+            "SELECT id, name, qty_on_hand, unit_cost, lot_id, item_type FROM items WHERE id=?",
+            (item_id,),
+        ).fetchone()
+        if item is None:
+            raise ValueError(f"Item id={item_id} not found.")
+        if item["item_type"] != "resale":
+            raise ValueError(f"Item {item_id} is a material, not a resale item.")
+
+        qty_on_hand = _Decimal(str(item["qty_on_hand"] or 0))
+        if qty_on_hand <= 0:
+            raise ValueError(f"Item '{item['name']}' has no qty on hand.")
+        if _Decimal(quantity) > qty_on_hand:
+            raise ValueError(f"Cannot sell {quantity} — only {qty_on_hand} of '{item['name']}' on hand.")
+
+        unit_cost = _Decimal(str(item["unit_cost"] or 0)).quantize(_Decimal("0.01"))
+        cogs_amount = (unit_cost * _Decimal(quantity)).quantize(_Decimal("0.01"))
+
+        acct_rows = conn.execute("SELECT id, code, name FROM accounts").fetchall()
+        account_map = {r["code"]: r["id"] for r in acct_rows}
+        id_to_name = {r["id"]: r["name"] for r in acct_rows}
+        id_to_code = {r["id"]: r["code"] for r in acct_rows}
+
+        if payment_account_code not in account_map:
+            raise ValueError(f"Account code '{payment_account_code}' not found.")
+        payment_account_id = account_map[payment_account_code]
+
+        if sale_channel == "ebay":
+            template_id = "SELL_INVENTORY_EBAY"
+            gross_revenue = (price + shipping).quantize(_Decimal("0.01"))
+            total_amount = price
+        else:
+            template_id = "SELL_INVENTORY_CASH"
+            gross_revenue = price
+            total_amount = price
+
+        item_desc = description or f"Sold {item['name']}"
+
+        revenue_lines = resolve_lines(
+            template_id, total_amount, account_map,
+            payment_account_id=payment_account_id,
+            sales_tax_amount=tax if sale_channel == "cash" else None,
+            ebay_fees_amount=fees if sale_channel == "ebay" else None,
+            ebay_shipping_charged=shipping if sale_channel == "ebay" else None,
+            inventory_item_id=item_id,
+        )
+        cogs_lines = [
+            JournalLineInput(account_id=account_map["5000"], debit=cogs_amount,
+                             memo="Auto COGS", inventory_item_id=item_id),
+            JournalLineInput(account_id=account_map["1200"], credit=cogs_amount,
+                             memo="Auto COGS", inventory_item_id=item_id),
+        ]
+        revenue_req = PostEntryRequest(
+            entry_date=_date.fromisoformat(entry_date), description=item_desc,
+            template_id=template_id, total_amount=gross_revenue,
+            lines=revenue_lines, created_by_method="manual", vendor=vendor, notes=notes,
+        )
+        cogs_req = PostEntryRequest(
+            entry_date=_date.fromisoformat(entry_date), description=f"Auto COGS — {item_desc}",
+            template_id="COGS_RECOGNITION", total_amount=cogs_amount,
+            lines=cogs_lines, created_by_method="system_auto", vendor=vendor, notes=notes,
+        )
+
+        def _after_sale_insert(tx_conn, _entry_ids):
+            tx_conn.execute(
+                "UPDATE items SET qty_on_hand = qty_on_hand - ? WHERE id=?",
+                (float(quantity), item_id),
+            )
+            if item["lot_id"] is not None:
+                tx_conn.execute(
+                    "UPDATE inventory_lots SET qty_remaining = MAX(0, qty_remaining - ?) WHERE id=?",
+                    (float(quantity), item["lot_id"]),
+                )
+
+        entry_ids = post_entries(conn, [revenue_req, cogs_req], after_insert=_after_sale_insert)
+
+        def _fmt_lines(req):
+            return [
+                {
+                    "account_code": id_to_code.get(ln.account_id, "?"),
+                    "account_name": id_to_name.get(ln.account_id, ""),
+                    "debit": f"{ln.debit:.2f}",
+                    "credit": f"{ln.credit:.2f}",
+                }
+                for ln in req.lines
+            ]
+
+        net_profit = (
+            gross_revenue - (tax if sale_channel == "cash" else _Decimal("0")) - fees - cogs_amount
+        ).quantize(_Decimal("0.01"))
+
+        return {
+            "success": True,
+            "revenue_entry_id": entry_ids[0],
+            "cogs_entry_id": entry_ids[1],
+            "item_id": item_id,
+            "item_name": item["name"],
+            "entry_date": entry_date,
+            "sale_channel": sale_channel,
+            "sale_price": f"{price:.2f}",
+            "gross_revenue": f"{gross_revenue:.2f}",
+            **({"ebay_fees": f"{fees:.2f}", "shipping_charged": f"{shipping:.2f}"} if sale_channel == "ebay" else {}),
+            **({"sales_tax": f"{tax:.2f}"} if sale_channel == "cash" and tax > 0 else {}),
+            "cogs": f"{cogs_amount:.2f}",
+            "net_profit": f"{net_profit:.2f}",
+            "qty_remaining": f"{qty_on_hand - _Decimal(quantity):.0f}",
+            "revenue_lines": _fmt_lines(revenue_req),
+            "cogs_lines": _fmt_lines(cogs_req),
+            "message": (
+                f"Sale recorded: revenue entry #{entry_ids[0]}, COGS entry #{entry_ids[1]}. "
+                f"qty_on_hand for '{item['name']}' is now {qty_on_hand - _Decimal(quantity):.0f}."
+            ),
+            "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+    finally:
+        conn.close()
+
+
 def register(mcp: FastMCP) -> None:
     """Attach all six tools to the FastMCP instance."""
 
@@ -370,15 +754,14 @@ def register(mcp: FastMCP) -> None:
 
     @mcp.tool(
         description=(
-            "Posts a balanced journal entry to SaltStocks from a receipt or expense. "
-            "This WRITES to the database — always call preview_entry first and confirm with "
-            "the user before calling this. "
+            "Queues a journal entry write for Holly's review in Salt Stocks. "
+            "The entry will NOT be posted until Holly approves it in the app. "
             "Supported templates: BUSINESS_MEAL, TRAVEL_HOTEL, TRAVEL_TRANSPORT, "
             "OFFICE_SUPPLIES, SOFTWARE_SUBSCRIPTION, SHIPPING_OUTBOUND, EBAY_FEES, "
             "PAYMENT_PROCESSING_FEE, UTILITIES, RENT, PROFESSIONAL_SERVICES, BANK_FEE, "
             "OTHER_EXPENSE, OTHER_INCOME, OWNER_CONTRIBUTION, OWNER_DRAW, "
             "PAY_CREDIT_CARD, SALES_TAX_REMITTED, REIMBURSE_OWNER, BUY_EXPENSE_PERSONAL. "
-            "Returns the new journal entry id and the lines posted."
+            "Always call preview_entry first and confirm with the user before calling this."
         )
     )
     def record_expense(
@@ -400,13 +783,21 @@ def register(mcp: FastMCP) -> None:
         notes: optional free-text notes (e.g. receipt number, eBay order id).
         expense_category_account_code: required only for OTHER_EXPENSE and BUY_EXPENSE_PERSONAL.
         """
-        from datetime import date as _date
-        from decimal import Decimal as _Decimal
-
         from app.db import get_conn
-        from app.accounting.posting import PostEntryRequest, post_entry
+        from app.mcp.staging import queue_write
 
         _validate_template_id(template_id)
+
+        params = {
+            "template_id": template_id,
+            "entry_date": entry_date,
+            "total_amount": total_amount,
+            "description": description,
+            "payment_account_code": payment_account_code,
+            "vendor": vendor,
+            "notes": notes,
+            "expense_category_account_code": expense_category_account_code,
+        }
 
         conn = get_conn()
         try:
@@ -420,50 +811,29 @@ def register(mcp: FastMCP) -> None:
                 vendor=vendor,
                 expense_category_account_code=expense_category_account_code,
             )
-
-            from app.accounting.posting import JournalLineInput
-            lines = [
-                JournalLineInput(
-                    account_id=ln["account_id"],
-                    debit=_Decimal(ln["debit"]),
-                    credit=_Decimal(ln["credit"]),
-                    memo=ln.get("memo"),
-                )
-                for ln in preview["lines_raw"]
-            ]
-
-            req = PostEntryRequest(
-                entry_date=_date.fromisoformat(entry_date),
-                description=description,
-                template_id=template_id,
-                total_amount=_Decimal(total_amount),
-                lines=lines,
-                created_by_method="manual",
-                vendor=vendor,
-                notes=notes,
-            )
-
-            entry_id = post_entry(conn, req)
-
-            return {
-                "success": True,
-                "entry_id": entry_id,
-                "template_id": template_id,
-                "entry_date": entry_date,
-                "description": description,
-                "total_amount": f"{_Decimal(total_amount):.2f}",
-                "lines": preview["lines"],
-                "message": f"Journal entry #{entry_id} posted successfully.",
-            }
         finally:
             conn.close()
+
+        vendor_part = f" ({vendor})" if vendor else ""
+        summary = f"Expense [{template_id}]: {description}{vendor_part} — ${total_amount} on {entry_date}"
+        pending_id = queue_write("record_expense", params, preview["lines"], summary)
+
+        return {
+            "status": "queued_for_review",
+            "pending_id": pending_id,
+            "preview": preview["lines"],
+            "message": (
+                f"Write queued (#{pending_id}). Open Salt Stocks to review and approve. "
+                f"Summary: {summary}"
+            ),
+        }
 
     # ── Tool 10: Record Inventory / Materials Purchase ────────────────────────
 
     @mcp.tool(
         description=(
-            "Records an inventory or materials purchase: posts the journal entry AND creates "
-            "or updates the item record(s) in one atomic operation. "
+            "Queues an inventory or materials purchase for Holly's review in Salt Stocks. "
+            "The journal entry and inventory update will NOT be applied until Holly approves. "
             "Set item_type='resale' for resale inventory, 'material' for production materials. "
             "Set use_personal_funds=True when you paid out of pocket (offsets to Owner Contributions). "
             "Set create_lot=True for lot purchases (e.g. a Goodwill lot, a wholesale box). "
@@ -471,7 +841,7 @@ def register(mcp: FastMCP) -> None:
             "generic stock); fungible=False creates N individual item rows with qty=1 each "
             "(comics, Lego sets — for per-unit tracking). "
             "Set existing_item_id to restock an item already in inventory (triggers WAC recalc). "
-            "Always call preview_inventory_purchase first and confirm with the user before writing."
+            "Always describe what will be created and confirm with the user before calling this."
         )
     )
     def record_inventory_purchase(
@@ -503,26 +873,18 @@ def register(mcp: FastMCP) -> None:
         existing_item_id: integer id of an existing item to restock (WAC is recalculated).
         category: optional item category label.
         """
-        from datetime import date as _date
         from decimal import Decimal as _Decimal
-
         from app.db import get_conn
-        from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entries
+        from app.mcp.staging import queue_write
 
-        # Validate
         if not use_personal_funds and not payment_account_code:
-            raise ValueError(
-                "Provide payment_account_code (e.g. '1020') or set use_personal_funds=True."
-            )
+            raise ValueError("Provide payment_account_code or set use_personal_funds=True.")
         if item_type not in ("resale", "material"):
             raise ValueError("item_type must be 'resale' or 'material'.")
         if quantity < 1:
             raise ValueError("quantity must be at least 1.")
         if create_lot and fungible is False and quantity > 200:
-            raise ValueError(
-                "fungible=False would create more than 200 individual item rows. "
-                "Use fungible=True for large fungible lots, or break into smaller batches."
-            )
+            raise ValueError("fungible=False would create more than 200 individual item rows.")
 
         try:
             amount = _Decimal(total_amount)
@@ -531,193 +893,95 @@ def register(mcp: FastMCP) -> None:
 
         unit_cost = (amount / _Decimal(quantity)).quantize(_Decimal("0.0001"))
 
-        # Pick template
         if item_type == "material":
             template_id = "BUY_MATERIALS_PERSONAL" if use_personal_funds else "BUY_MATERIALS"
         else:
             template_id = "BUY_INVENTORY_PERSONAL" if use_personal_funds else "BUY_INVENTORY"
 
+        # Build a preview of the 2-line journal entry for the card display
         conn = get_conn()
         try:
-            # Resolve account map
-            rows = conn.execute(
-                "SELECT id, code FROM accounts WHERE is_active = 1"
-            ).fetchall()
+            rows = conn.execute("SELECT id, code, name FROM accounts WHERE is_active=1").fetchall()
             account_map = {r["code"]: r["id"] for r in rows}
+            id_to_name = {r["id"]: r["name"] for r in rows}
 
             inv_account_id = account_map.get("1200")
             if not inv_account_id:
-                raise ValueError("Account 1200 (Inventory) not found in chart of accounts.")
+                raise ValueError("Account 1200 (Inventory) not found.")
 
             if use_personal_funds:
                 cr_account_id = account_map.get("3100")
                 if not cr_account_id:
                     raise ValueError("Account 3100 (Owner Contributions) not found.")
+                cr_code = "3100"
             else:
                 if payment_account_code not in account_map:
-                    raise ValueError(
-                        f"Account code '{payment_account_code}' not found. "
-                        "Call list_accounts to see valid codes."
-                    )
+                    raise ValueError(f"Account code '{payment_account_code}' not found.")
                 cr_account_id = account_map[payment_account_code]
-
-            # Resolve existing item info for WAC (if restocking)
-            existing_qty = _Decimal("0")
-            existing_unit_cost = _Decimal("0")
-            if existing_item_id is not None:
-                row = conn.execute(
-                    "SELECT qty_on_hand, unit_cost FROM items WHERE id = ?",
-                    (existing_item_id,),
-                ).fetchone()
-                if row is None:
-                    raise ValueError(f"Item id={existing_item_id} not found.")
-                existing_qty = _Decimal(str(row["qty_on_hand"] or 0))
-                existing_unit_cost = _Decimal(str(row["unit_cost"] or 0))
-
-            # Restock: we know the item_id now, so link the DR line immediately.
-            # New item or lot: item_id is generated in before_insert/after_insert;
-            # we backfill via _after_insert for single items, leave unlinked for lots
-            # (lots use items.lot_id as the cost anchor instead).
-            dr_item_id = existing_item_id  # None for new items / lots
-            lines = [
-                JournalLineInput(account_id=inv_account_id, debit=amount, inventory_item_id=dr_item_id),
-                JournalLineInput(account_id=cr_account_id, credit=amount),
-            ]
-
-            req = PostEntryRequest(
-                entry_date=_date.fromisoformat(entry_date),
-                description=description,
-                template_id=template_id,
-                total_amount=amount,
-                lines=lines,
-                created_by_method="manual",
-                vendor=vendor,
-                notes=notes,
-            )
-
-            # Build the item-side-effect callbacks
-            lot_ctx = {
-                "quantity": quantity,
-                "allocated_unit_cost": unit_cost,
-                "item_name": item_name,
-                "fungible": fungible,
-            }
-
-            created_items: list[dict] = []
-            created_lot_id: list[int] = []  # mutable container for after_insert closure
-
-            def _before_insert(tx_conn):
-                if existing_item_id is not None:
-                    # Restock: WAC recalculation
-                    new_qty = existing_qty + _Decimal(quantity)
-                    new_unit_cost = (
-                        (existing_qty * existing_unit_cost + _Decimal(quantity) * unit_cost)
-                        / new_qty
-                    ).quantize(_Decimal("0.0001"))
-                    tx_conn.execute(
-                        "UPDATE items SET qty_on_hand=?, unit_cost=? WHERE id=?",
-                        (float(new_qty), float(new_unit_cost), existing_item_id),
-                    )
-                    created_items.append({
-                        "item_id": existing_item_id,
-                        "action": "restocked",
-                        "new_qty": str(new_qty),
-                        "new_unit_cost": str(new_unit_cost.quantize(_Decimal("0.01"))),
-                    })
-                elif not create_lot:
-                    # Single new item
-                    from app.accounting.routes import _insert_new_inventory_purchase_item
-                    iid = _insert_new_inventory_purchase_item(
-                        tx_conn,
-                        name=item_name,
-                        quantity=quantity,
-                        unit_cost=unit_cost,
-                        item_type=item_type,
-                    )
-                    if category:
-                        tx_conn.execute(
-                            "UPDATE items SET category=? WHERE id=?", (category, iid)
-                        )
-                    created_items.append({"item_id": iid, "action": "created", "qty": quantity})
-
-            def _after_insert(tx_conn, entry_ids):
-                # Backfill inventory_item_id on the DR 1200 line for new single items.
-                # We couldn't set it earlier because the item didn't exist yet.
-                if not create_lot and existing_item_id is None and created_items:
-                    new_iid = created_items[0]["item_id"]
-                    tx_conn.execute(
-                        """
-                        UPDATE journal_lines
-                        SET inventory_item_id = ?
-                        WHERE entry_id = ? AND account_id = ? AND CAST(debit AS REAL) > 0
-                        """,
-                        (new_iid, entry_ids[0], inv_account_id),
-                    )
-
-                if create_lot and existing_item_id is None:
-                    from app.accounting.routes import _create_inventory_lot_with_items
-                    lid = _create_inventory_lot_with_items(
-                        tx_conn,
-                        ctx=lot_ctx,
-                        journal_entry_id=entry_ids[0],
-                        entry_date=entry_date,
-                        vendor=vendor,
-                        fungible=fungible,
-                    )
-                    if category:
-                        tx_conn.execute(
-                            "UPDATE items SET category=? WHERE lot_id=?", (category, lid)
-                        )
-                    created_lot_id.append(lid)
-                    n_items = tx_conn.execute(
-                        "SELECT COUNT(*) AS c FROM items WHERE lot_id=?", (lid,)
-                    ).fetchone()["c"]
-                    created_items.append({
-                        "lot_id": lid,
-                        "action": "lot_created",
-                        "items_created": n_items,
-                    })
-
-            entry_ids = post_entries(
-                conn, [req],
-                before_insert=_before_insert,
-                after_insert=_after_insert,
-            )
-
-            from datetime import datetime, timezone
-            return {
-                "success": True,
-                "entry_id": entry_ids[0],
-                "template_id": template_id,
-                "entry_date": entry_date,
-                "description": description,
-                "vendor": vendor,
-                "total_amount": f"{amount:.2f}",
-                "unit_cost": f"{unit_cost:.4f}",
-                "quantity": quantity,
-                "item_type": item_type,
-                "inventory_changes": created_items,
-                **({"lot_id": created_lot_id[0]} if created_lot_id else {}),
-                "message": f"Journal entry #{entry_ids[0]} posted and inventory updated.",
-                "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            }
+                cr_code = payment_account_code
         finally:
             conn.close()
+
+        preview_lines = [
+            {
+                "account_code": "1200",
+                "account_name": id_to_name.get(inv_account_id, "Inventory"),
+                "debit": f"{amount:.2f}",
+                "credit": "0.00",
+            },
+            {
+                "account_code": cr_code,
+                "account_name": id_to_name.get(cr_account_id, ""),
+                "debit": "0.00",
+                "credit": f"{amount:.2f}",
+            },
+        ]
+
+        params = {
+            "entry_date": entry_date,
+            "total_amount": total_amount,
+            "description": description,
+            "item_name": item_name,
+            "quantity": quantity,
+            "item_type": item_type,
+            "vendor": vendor,
+            "notes": notes,
+            "payment_account_code": payment_account_code,
+            "use_personal_funds": use_personal_funds,
+            "create_lot": create_lot,
+            "fungible": fungible,
+            "existing_item_id": existing_item_id,
+            "category": category,
+        }
+
+        action = "Restock" if existing_item_id else ("Lot purchase" if create_lot else "New item")
+        vendor_part = f" from {vendor}" if vendor else ""
+        summary = f"{action}: {quantity}x {item_name}{vendor_part} — ${total_amount} on {entry_date}"
+        pending_id = queue_write("record_inventory_purchase", params, preview_lines, summary)
+
+        return {
+            "status": "queued_for_review",
+            "pending_id": pending_id,
+            "preview": preview_lines,
+            "message": (
+                f"Write queued (#{pending_id}). Open Salt Stocks to review and approve. "
+                f"Summary: {summary}"
+            ),
+        }
 
     # ── Tool 11: Record Sale ──────────────────────────────────────────────────
 
     @mcp.tool(
         description=(
-            "Records the sale of an inventory item: posts the revenue journal entry AND the "
-            "auto-COGS entry, then decrements qty_on_hand (and lot qty_remaining if applicable) "
-            "— all in one atomic transaction. "
+            "Queues a sale for Holly's review in Salt Stocks. "
+            "The revenue entry, auto-COGS entry, and qty decrement will NOT apply until Holly approves. "
             "sale_channel='cash' for in-person/card sales; 'ebay' for eBay orders. "
             "For eBay: sale_price is the item price the buyer paid (not including shipping); "
             "ebay_fees is the combined eBay fee; shipping_charged is what the buyer paid for "
             "shipping (added to gross revenue). "
             "For cash: sales_tax is split into a separate Sales Tax Payable credit if > 0. "
-            "Always show the user what will be posted (call get_item_detail first to confirm "
-            "unit_cost and qty) and get confirmation before calling this."
+            "Always call get_item_detail first to confirm unit_cost and qty, summarize what "
+            "will be posted, and get confirmation before calling this."
         )
     )
     def record_sale(
@@ -745,12 +1009,11 @@ def register(mcp: FastMCP) -> None:
         ebay_fees: eBay sales only — combined fee amount e.g. '4.20'.
         shipping_charged: eBay sales only — shipping the buyer paid e.g. '5.00'.
         """
-        from datetime import date as _date, datetime, timezone
         from decimal import Decimal as _Decimal
-
         from app.db import get_conn
         from app.accounting.catalog import resolve_lines
-        from app.accounting.posting import PostEntryRequest, JournalLineInput, post_entries
+        from app.accounting.posting import JournalLineInput
+        from app.mcp.staging import queue_write
 
         if sale_channel not in ("cash", "ebay"):
             raise ValueError("sale_channel must be 'cash' or 'ebay'.")
@@ -767,47 +1030,37 @@ def register(mcp: FastMCP) -> None:
 
         conn = get_conn()
         try:
-            # Resolve item
             item = conn.execute(
-                "SELECT id, name, qty_on_hand, unit_cost, lot_id, item_type FROM items WHERE id = ?",
+                "SELECT id, name, qty_on_hand, unit_cost, lot_id, item_type FROM items WHERE id=?",
                 (item_id,),
             ).fetchone()
             if item is None:
                 raise ValueError(f"Item id={item_id} not found.")
             if item["item_type"] != "resale":
-                raise ValueError(
-                    f"Item {item_id} is a material, not a resale item. Only resale items can be sold."
-                )
+                raise ValueError(f"Item {item_id} is a material, not a resale item.")
 
             qty_on_hand = _Decimal(str(item["qty_on_hand"] or 0))
             if qty_on_hand <= 0:
                 raise ValueError(f"Item '{item['name']}' has no qty on hand.")
             if _Decimal(quantity) > qty_on_hand:
-                raise ValueError(
-                    f"Cannot sell {quantity} — only {qty_on_hand} of '{item['name']}' on hand."
-                )
+                raise ValueError(f"Cannot sell {quantity} — only {qty_on_hand} on hand.")
 
             unit_cost = _Decimal(str(item["unit_cost"] or 0)).quantize(_Decimal("0.01"))
             cogs_amount = (unit_cost * _Decimal(quantity)).quantize(_Decimal("0.01"))
 
-            # Account map
             acct_rows = conn.execute("SELECT id, code, name FROM accounts").fetchall()
             account_map = {r["code"]: r["id"] for r in acct_rows}
             id_to_name = {r["id"]: r["name"] for r in acct_rows}
             id_to_code = {r["id"]: r["code"] for r in acct_rows}
 
             if payment_account_code not in account_map:
-                raise ValueError(
-                    f"Account code '{payment_account_code}' not found. "
-                    "Call list_accounts to see valid codes."
-                )
+                raise ValueError(f"Account code '{payment_account_code}' not found.")
             payment_account_id = account_map[payment_account_code]
 
-            # Template and total_amount
             if sale_channel == "ebay":
                 template_id = "SELL_INVENTORY_EBAY"
                 gross_revenue = (price + shipping).quantize(_Decimal("0.01"))
-                total_amount = price  # resolve_lines adds shipping internally
+                total_amount = price
             else:
                 template_id = "SELL_INVENTORY_CASH"
                 gross_revenue = price
@@ -815,117 +1068,75 @@ def register(mcp: FastMCP) -> None:
 
             item_desc = description or f"Sold {item['name']}"
 
-            # Revenue lines
-            revenue_lines = resolve_lines(
-                template_id,
-                total_amount,
-                account_map,
+            revenue_lines_obj = resolve_lines(
+                template_id, total_amount, account_map,
                 payment_account_id=payment_account_id,
                 sales_tax_amount=tax if sale_channel == "cash" else None,
                 ebay_fees_amount=fees if sale_channel == "ebay" else None,
                 ebay_shipping_charged=shipping if sale_channel == "ebay" else None,
                 inventory_item_id=item_id,
             )
-
-            # COGS lines
-            cogs_lines = [
-                JournalLineInput(
-                    account_id=account_map["5000"],
-                    debit=cogs_amount,
-                    memo="Auto COGS",
-                    inventory_item_id=item_id,
-                ),
-                JournalLineInput(
-                    account_id=account_map["1200"],
-                    credit=cogs_amount,
-                    memo="Auto COGS",
-                    inventory_item_id=item_id,
-                ),
+            cogs_lines_obj = [
+                JournalLineInput(account_id=account_map["5000"], debit=cogs_amount,
+                                 memo="Auto COGS", inventory_item_id=item_id),
+                JournalLineInput(account_id=account_map["1200"], credit=cogs_amount,
+                                 memo="Auto COGS", inventory_item_id=item_id),
             ]
 
-            revenue_req = PostEntryRequest(
-                entry_date=_date.fromisoformat(entry_date),
-                description=item_desc,
-                template_id=template_id,
-                total_amount=gross_revenue,
-                lines=revenue_lines,
-                created_by_method="manual",
-                vendor=vendor,
-                notes=notes,
-            )
-
-            cogs_req = PostEntryRequest(
-                entry_date=_date.fromisoformat(entry_date),
-                description=f"Auto COGS — {item_desc}",
-                template_id="COGS_RECOGNITION",
-                total_amount=cogs_amount,
-                lines=cogs_lines,
-                created_by_method="system_auto",
-                vendor=vendor,
-                notes=notes,
-            )
-
-            def _after_sale_insert(tx_conn, _entry_ids):
-                tx_conn.execute(
-                    "UPDATE items SET qty_on_hand = qty_on_hand - ? WHERE id = ?",
-                    (float(quantity), item_id),
-                )
-                if item["lot_id"] is not None:
-                    tx_conn.execute(
-                        """
-                        UPDATE inventory_lots
-                        SET qty_remaining = MAX(0, qty_remaining - ?)
-                        WHERE id = ?
-                        """,
-                        (float(quantity), item["lot_id"]),
-                    )
-
-            entry_ids = post_entries(
-                conn, [revenue_req, cogs_req],
-                after_insert=_after_sale_insert,
-            )
-
-            # Build human-readable line summary
-            def _fmt_lines(req):
-                out = []
-                for ln in req.lines:
-                    code = id_to_code.get(ln.account_id, "?")
-                    out.append({
-                        "account_code": code,
+            def _fmt(lines_obj):
+                return [
+                    {
+                        "account_code": id_to_code.get(ln.account_id, "?"),
                         "account_name": id_to_name.get(ln.account_id, ""),
                         "debit": f"{ln.debit:.2f}",
                         "credit": f"{ln.credit:.2f}",
-                    })
-                return out
+                    }
+                    for ln in lines_obj
+                ]
 
-            net_profit = (gross_revenue - (tax if sale_channel == "cash" else _Decimal("0")) - fees - cogs_amount).quantize(_Decimal("0.01"))
-
-            return {
-                "success": True,
-                "revenue_entry_id": entry_ids[0],
-                "cogs_entry_id": entry_ids[1],
-                "item_id": item_id,
-                "item_name": item["name"],
-                "entry_date": entry_date,
-                "sale_channel": sale_channel,
-                "sale_price": f"{price:.2f}",
-                "gross_revenue": f"{gross_revenue:.2f}",
-                **({"ebay_fees": f"{fees:.2f}", "shipping_charged": f"{shipping:.2f}"} if sale_channel == "ebay" else {}),
-                **({"sales_tax": f"{tax:.2f}"} if sale_channel == "cash" and tax > 0 else {}),
-                "cogs": f"{cogs_amount:.2f}",
-                "net_profit": f"{net_profit:.2f}",
-                "qty_remaining": f"{qty_on_hand - _Decimal(quantity):.0f}",
-                "revenue_lines": _fmt_lines(revenue_req),
-                "cogs_lines": _fmt_lines(cogs_req),
-                "message": (
-                    f"Sale recorded: revenue entry #{entry_ids[0]}, "
-                    f"COGS entry #{entry_ids[1]}. "
-                    f"qty_on_hand for '{item['name']}' is now {qty_on_hand - _Decimal(quantity):.0f}."
-                ),
-                "as_of": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            }
+            preview_lines = (
+                [{"account_code": "— Revenue entry —", "account_name": "", "debit": "", "credit": ""}]
+                + _fmt(revenue_lines_obj)
+                + [{"account_code": "— COGS entry —", "account_name": "", "debit": "", "credit": ""}]
+                + _fmt(cogs_lines_obj)
+            )
         finally:
             conn.close()
+
+        params = {
+            "item_id": item_id,
+            "entry_date": entry_date,
+            "sale_price": sale_price,
+            "payment_account_code": payment_account_code,
+            "quantity": quantity,
+            "sale_channel": sale_channel,
+            "sales_tax": sales_tax,
+            "ebay_fees": ebay_fees,
+            "shipping_charged": shipping_charged,
+            "description": description,
+            "vendor": vendor,
+            "notes": notes,
+        }
+
+        channel_label = "eBay" if sale_channel == "ebay" else "cash"
+        summary = (
+            f"Sale [{channel_label}]: {item_desc} — ${gross_revenue:.2f} gross, "
+            f"COGS ${cogs_amount:.2f} on {entry_date}"
+        )
+        pending_id = queue_write("record_sale", params, preview_lines, summary)
+
+        return {
+            "status": "queued_for_review",
+            "pending_id": pending_id,
+            "item_name": item["name"],
+            "gross_revenue": f"{gross_revenue:.2f}",
+            "cogs": f"{cogs_amount:.2f}",
+            "preview": preview_lines,
+            "message": (
+                f"Write queued (#{pending_id}). Open Salt Stocks to review and approve. "
+                f"Summary: {summary}"
+            ),
+        }
 
     # ── Tool 6: Recent Journal Entries ────────────────────────────────────────
 
@@ -939,20 +1150,22 @@ def register(mcp: FastMCP) -> None:
     def get_recent_journal_entries(
         limit: int = 10,
         start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         account_code: Optional[str] = None,
     ) -> dict:
         """
         limit: max entries to return (1–50, default 10).
         start_date: ISO date — only return entries on or after this date.
+        end_date: ISO date — only return entries on or before this date. Use with start_date to bracket a specific day or range.
         account_code: chart-of-accounts code e.g. '5000' — filter to entries touching this account.
         """
         if limit > 50:
-            raise ValueError("limit cannot exceed 50. Narrow the date range or account filter instead.")
+            raise ValueError("limit cannot exceed 50. Use start_date + end_date to bracket a specific date range instead.")
 
         from app.db import get_conn
         from app.services import mcp_queries
         conn = get_conn()
         try:
-            return mcp_queries.recent_journal_entries(conn, limit, start_date, account_code)
+            return mcp_queries.recent_journal_entries(conn, limit, start_date, account_code, end_date)
         finally:
             conn.close()

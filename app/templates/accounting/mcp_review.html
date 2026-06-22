@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/accounting.css" />
+<style>
+  .mcp-page { max-width: 820px; margin: 0 auto; padding: 24px 16px; }
+  .mcp-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+  .mcp-header h1 { margin: 0; font-size: 1.4rem; }
+  .mcp-count-badge {
+    background: var(--ss-warn-bg, #fef3c7);
+    color: var(--ss-warn, #92400e);
+    border: 1px solid var(--ss-warn, #d97706);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .mcp-card {
+    background: var(--ss-surface, #fff);
+    border: 1px solid var(--ss-border, #e5e7eb);
+    border-radius: var(--ss-r-card, 8px);
+    margin-bottom: 18px;
+    overflow: hidden;
+    transition: opacity 0.3s ease, max-height 0.4s ease;
+  }
+  .mcp-card.resolved { opacity: 0.45; pointer-events: none; }
+  .mcp-card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--ss-border, #e5e7eb);
+  }
+  .mcp-card-header .summary { flex: 1; font-weight: 600; font-size: 0.95rem; line-height: 1.4; }
+  .mcp-tool-pill {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--ss-accent-soft, #eff6ff);
+    color: var(--ss-accent, #1d4ed8);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .mcp-card-meta {
+    font-size: 0.78rem;
+    color: var(--ss-muted, #6b7280);
+    padding: 6px 16px 0;
+  }
+  .mcp-journal-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    margin: 10px 0 0;
+  }
+  .mcp-journal-table th {
+    text-align: left;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ss-muted, #6b7280);
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--ss-border, #e5e7eb);
+  }
+  .mcp-journal-table th.num, .mcp-journal-table td.num { text-align: right; }
+  .mcp-journal-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--ss-border-subtle, #f3f4f6);
+  }
+  .mcp-journal-table tr:last-child td { border-bottom: none; }
+  .mcp-journal-table tr.section-header td {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ss-muted, #9ca3af);
+    background: var(--ss-bg-subtle, #f9fafb);
+    padding: 4px 8px;
+  }
+  .mcp-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border-top: 1px solid var(--ss-border, #e5e7eb);
+    background: var(--ss-bg-subtle, #f9fafb);
+  }
+  .mcp-error {
+    color: var(--ss-danger, #dc2626);
+    font-size: 0.82rem;
+    flex: 1;
+    display: none;
+  }
+  .mcp-status-badge {
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+  .mcp-status-approved { background: #dcfce7; color: #15803d; }
+  .mcp-status-rejected { background: #fee2e2; color: #b91c1c; }
+  .mcp-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--ss-muted, #6b7280);
+  }
+  .mcp-empty h2 { margin: 0 0 8px; font-size: 1.1rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="mcp-page">
+
+  <div class="mcp-header">
+    <a href="/" style="font-size:0.85rem; color:var(--ss-muted); text-decoration:none;">← Dashboard</a>
+    <h1>Review AI Writes</h1>
+    {% if pending %}
+    <span class="mcp-count-badge" id="pending-badge">{{ pending|length }} pending</span>
+    {% endif %}
+  </div>
+
+  {% if not pending %}
+  <div class="mcp-empty">
+    <h2>Nothing to review</h2>
+    <p>No AI writes are waiting for approval.</p>
+    <a href="/" class="btn">Back to Dashboard</a>
+  </div>
+  <form id="cleanup-form" method="post" action="/accounting/mcp-review/cleanup" style="display:none;"></form>
+  <script>document.getElementById('cleanup-form').submit();</script>
+
+  {% else %}
+
+  <p style="color:var(--ss-muted); font-size:0.9rem; margin-bottom:20px;">
+    Claude queued the following writes. Review each one — <strong>nothing has been saved yet.</strong>
+    Approve to post, or reject to discard.
+  </p>
+
+  <div id="cards-container">
+  {% for item in pending %}
+  <div class="mcp-card" id="card-{{ item.id }}" data-pending-id="{{ item.id }}">
+
+    <div class="mcp-card-header">
+      <span class="summary">{{ item.human_summary }}</span>
+      <span class="mcp-tool-pill">{{ item.tool_name }}</span>
+    </div>
+    <div class="mcp-card-meta">Queued {{ item.created_at }}</div>
+
+    <div style="padding: 0 16px 12px;">
+      <table class="mcp-journal-table">
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th></th>
+            <th class="num">Debit</th>
+            <th class="num">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for line in item.preview_lines %}
+          {% if not line.debit and not line.credit %}
+          <tr class="section-header"><td colspan="4">{{ line.account_code }}</td></tr>
+          {% else %}
+          <tr>
+            <td><code style="font-size:0.8em;">{{ line.account_code }}</code></td>
+            <td style="color:var(--ss-muted);">{{ line.account_name }}</td>
+            <td class="num">{% if line.debit and line.debit != '0.00' %}{{ line.debit }}{% endif %}</td>
+            <td class="num">{% if line.credit and line.credit != '0.00' %}{{ line.credit }}{% endif %}</td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mcp-card-footer">
+      <button class="btn btn-success" onclick="approveWrite({{ item.id }}, this)">Approve</button>
+      <button class="btn btn-danger" onclick="rejectWrite({{ item.id }}, this)" style="background:var(--ss-danger,#dc2626); color:#fff; border:none; border-radius:var(--ss-r-btn,6px); padding:6px 14px; cursor:pointer; font-size:0.875rem;">Reject</button>
+      <span class="mcp-error" id="error-{{ item.id }}"></span>
+    </div>
+
+  </div>
+  {% endfor %}
+  </div>
+
+  <div id="all-done-msg" style="display:none; text-align:center; padding:40px 20px; color:var(--ss-muted);">
+    <strong>All done!</strong> Returning to dashboard…
+  </div>
+
+  <form id="cleanup-form" method="post" action="/accounting/mcp-review/cleanup" style="display:none;"></form>
+
+  {% endif %}
+
+</div>
+
+<script>
+let pendingCount = {{ pending|length if pending else 0 }};
+
+async function approveWrite(id, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Approving…';
+  const card = document.getElementById('card-' + id);
+  const errEl = document.getElementById('error-' + id);
+
+  try {
+    const resp = await fetch('/accounting/mcp-review/' + id + '/approve', { method: 'POST' });
+    const data = await resp.json();
+    if (data.ok) {
+      resolveCard(card, 'approved');
+    } else {
+      errEl.textContent = 'Approval failed: ' + data.error;
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Approve';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error — please try again.';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Approve';
+  }
+}
+
+async function rejectWrite(id, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Rejecting…';
+  const card = document.getElementById('card-' + id);
+
+  try {
+    await fetch('/accounting/mcp-review/' + id + '/reject', { method: 'POST' });
+    resolveCard(card, 'rejected');
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = 'Reject';
+  }
+}
+
+function resolveCard(card, status) {
+  // Replace footer with status badge
+  const footer = card.querySelector('.mcp-card-footer');
+  const label = status === 'approved' ? 'Approved' : 'Rejected';
+  const cls = status === 'approved' ? 'mcp-status-approved' : 'mcp-status-rejected';
+  footer.innerHTML = '<span class="mcp-status-badge ' + cls + '">' + label + '</span>';
+  card.classList.add('resolved');
+
+  pendingCount--;
+  const badge = document.getElementById('pending-badge');
+  if (badge) badge.textContent = pendingCount + ' pending';
+
+  if (pendingCount === 0) {
+    document.getElementById('all-done-msg').style.display = 'block';
+    setTimeout(() => {
+      document.getElementById('cleanup-form').submit();
+    }, 1500);
+  }
+}
+</script>
+{% endblock %}

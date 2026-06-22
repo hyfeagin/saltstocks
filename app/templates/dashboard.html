@@ -101,6 +101,15 @@
 {% block content %}
 <div class="db-page">
 
+{# ─── MCP pending-review banner (always visible until resolved) ─── #}
+{% if mcp_pending_count %}
+<div class="banner banner-warn" style="display:flex; align-items:center; gap:12px; padding:10px 16px; margin-bottom:8px;">
+  <strong>{{ mcp_pending_count }} AI write{{ 's' if mcp_pending_count > 1 else '' }} pending your approval</strong>
+  <span style="color:var(--ss-muted); font-size:0.9em;">Claude queued {{ 'these changes' if mcp_pending_count > 1 else 'this change' }} — nothing has been saved yet.</span>
+  <a href="/accounting/mcp-review" class="btn btn-sm" style="margin-left:auto; white-space:nowrap;">Review Now</a>
+</div>
+{% endif %}
+
 {# ─── Needs-attention strip (only when nags exist, dismissible) ───── #}
 {% if nags %}
 <div class="db-nag" id="db-nag-strip">

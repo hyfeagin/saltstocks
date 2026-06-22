@@ -219,6 +219,14 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         label = f"{low_qty} item{'s' if low_qty > 1 else ''} out of stock"
         nags.append({"label": label, "action_label": "Review inventory", "action_url": "/resale"})
 
+    # ── MCP staged writes pending review ─────────────────────────────
+    try:
+        mcp_pending_count = conn.execute(
+            "SELECT COUNT(*) FROM mcp_pending_writes WHERE status='pending'"
+        ).fetchone()[0]
+    except Exception:
+        mcp_pending_count = 0
+
     return render(
         "dashboard.html",
         request,
@@ -239,6 +247,7 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         recent_entries=recent_entries,
         nags=nags,
         month_name=today.strftime("%b"),
+        mcp_pending_count=mcp_pending_count,
     )
 # =========================
 # ANCHOR: DASHBOARD_VIEW_END

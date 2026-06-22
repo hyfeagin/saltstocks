@@ -489,6 +489,7 @@ def recent_journal_entries(
     limit: int = 10,
     start_date: Optional[str] = None,
     account_code: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     limit = min(max(1, limit), 50)
 
@@ -497,6 +498,9 @@ def recent_journal_entries(
     if start_date:
         clauses.append("je.entry_date >= ?")
         params.append(start_date)
+    if end_date:
+        clauses.append("je.entry_date <= ?")
+        params.append(end_date)
     if account_code:
         clauses.append(
             """je.id IN (
