@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -47,6 +47,25 @@ app.include_router(materials.router)
 app.include_router(accounting_routes.router, prefix="/accounting")
 
 _PUBLIC_PATHS = {"/login", "/setup"}
+
+_SCANNER_PREFIXES = (
+    "/.env", "/.git", "/.htaccess", "/.htpasswd", "/.DS_Store",
+    "/wp-", "/wordpress", "/phpmyadmin", "/adminer", "/xmlrpc",
+    "/cgi-bin", "/shell", "/config.php", "/admin.php",
+)
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    return PlainTextResponse("User-agent: *\nDisallow: /\n")
+
+
+class _ScannerBlockMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path.lower()
+        if any(path.startswith(p) for p in _SCANNER_PREFIXES):
+            return Response(status_code=404)
+        return await call_next(request)
 
 
 @app.get("/.well-known/oauth-authorization-server", include_in_schema=False)
@@ -104,8 +123,10 @@ class _AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# SessionMiddleware must be added last (outermost) so the session is populated
-# before _AuthMiddleware reads it.
+# Middleware is applied in reverse registration order (last added = outermost).
+# SessionMiddleware must be outermost so the session is available to _AuthMiddleware.
+# _ScannerBlockMiddleware is innermost so it short-circuits before session overhead.
+app.add_middleware(_ScannerBlockMiddleware)
 app.add_middleware(_AuthMiddleware)
 _https_only = os.getenv("SALTSTOCKS_HTTPS_ONLY", "false").lower() == "true"
 app.add_middleware(SessionMiddleware, secret_key=get_session_secret(), https_only=_https_only)
