@@ -1,7 +1,8 @@
 """
 SaltStocks MCP server.
 
-Exposes live inventory and accounting data to Claude via six read-only tools.
+Exposes live inventory and accounting data (read + staged writes) and kanban
+boards (direct writes) to Claude / ChatGPT.
 Mounted inside the FastAPI app at /mcp — no separate process needed.
 
 Auth strategy:
@@ -25,10 +26,11 @@ from mcp.server.auth.provider import RefreshToken as _SDKRefreshToken
 from mcp.server.auth.settings import ClientRegistrationOptions
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
+from app.mcp import kanban_tools as _kanban_tools
 from app.mcp import tools as _tools
 
 mcp = FastMCP(
-    "SaltStocks Financial Data",
+    "SaltStocks",
     instructions=(
         "Read and write access to SaltStocks inventory and accounting data for Geekery Vault. "
         "READ tools — use get_pnl_summary for profitability questions, get_inventory_snapshot "
@@ -52,11 +54,19 @@ mcp = FastMCP(
         "qty decrement), get confirmation, then call record_sale. "
         "record_sale handles cash sales (with optional sales tax split) and eBay sales "
         "(with fees and buyer-paid shipping). It posts both the revenue entry and the "
-        "COGS recognition entry atomically and decrements qty_on_hand."
+        "COGS recognition entry atomically and decrements qty_on_hand. "
+        "KANBAN BOARDS — SaltStocks also hosts kanban boards; job search results go to the "
+        "board with slug 'job-search'. To record job leads: (1) call get_board_cards with "
+        "include_archived=true to see what is already tracked (archived = rejected, never "
+        "re-add); (2) call add_job_cards once with all new results — always include the listing "
+        "url, and fit_score (1-5) plus notes explaining the fit when you have them. Cards land "
+        "in the 'New' column immediately (no confirmation needed); duplicates are skipped and "
+        "reported. Use update_card to enrich a card, and move_card only when Holly asks."
     ),
 )
 
 _tools.register(mcp)
+_kanban_tools.register(mcp)
 
 
 def _get_setting(key: str) -> str | None:

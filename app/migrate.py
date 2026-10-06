@@ -34,6 +34,77 @@ def ensure_column(conn: sqlite3.Connection, table: str, col: str, ddl: str):
     if not column_exists(conn, table, col):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
 
+KANBAN_DEFAULT_COLUMNS = ["New", "Interested", "Applied", "Interviewing", "Offer", "Closed"]
+
+
+def migrate_kanban(conn: sqlite3.Connection) -> None:
+    """Kanban tables + seeded Job Search board. Idempotent; also used by tests."""
+    if not table_exists(conn, "kanban_boards"):
+        conn.execute("""
+        CREATE TABLE kanban_boards (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          name        TEXT NOT NULL,
+          slug        TEXT NOT NULL UNIQUE,
+          description TEXT,
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          archived    INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+    if not table_exists(conn, "kanban_columns"):
+        conn.execute("""
+        CREATE TABLE kanban_columns (
+          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          board_id  INTEGER NOT NULL REFERENCES kanban_boards(id) ON DELETE CASCADE,
+          name      TEXT NOT NULL,
+          position  INTEGER NOT NULL DEFAULT 0,
+          is_inbox  INTEGER NOT NULL DEFAULT 0
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_kcol_board ON kanban_columns(board_id)")
+    if not table_exists(conn, "kanban_cards"):
+        conn.execute("""
+        CREATE TABLE kanban_cards (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          board_id     INTEGER NOT NULL REFERENCES kanban_boards(id) ON DELETE CASCADE,
+          column_id    INTEGER NOT NULL REFERENCES kanban_columns(id),
+          position     INTEGER NOT NULL DEFAULT 0,
+          title        TEXT NOT NULL,
+          description  TEXT,
+          created_by   TEXT NOT NULL DEFAULT 'user'
+                       CHECK (created_by IN ('user','mcp','import')),
+          created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+          archived_at  TEXT,
+          company      TEXT,
+          location     TEXT,
+          remote_type  TEXT,
+          url          TEXT,
+          salary_text  TEXT,
+          source       TEXT,
+          external_id  TEXT,
+          posted_date  TEXT,
+          fit_score    INTEGER CHECK (fit_score IS NULL OR fit_score BETWEEN 1 AND 5),
+          notes        TEXT,
+          dedup_key    TEXT,
+          UNIQUE (board_id, dedup_key)
+        )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_kcard_col ON kanban_cards(column_id, position)")
+
+    # Seed the Job Search board once
+    if conn.execute("SELECT 1 FROM kanban_boards WHERE slug='job-search'").fetchone() is None:
+        cur = conn.execute(
+            "INSERT INTO kanban_boards (name, slug, description) VALUES (?,?,?)",
+            ("Job Search", "job-search", "Job leads from the AI job search, plus manual entries."),
+        )
+        board_id = cur.lastrowid
+        for pos, name in enumerate(KANBAN_DEFAULT_COLUMNS):
+            conn.execute(
+                "INSERT INTO kanban_columns (board_id, name, position, is_inbox) VALUES (?,?,?,?)",
+                (board_id, name, pos, 1 if pos == 0 else 0),
+            )
+
+
 def migrate():
     conn = sqlite3.connect(DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -638,6 +709,9 @@ def migrate():
               status        TEXT NOT NULL DEFAULT 'pending'
             )
             """)
+
+        # ── Kanban boards ─────────────────────────────────────────────────────
+        migrate_kanban(conn)
 
     conn.close()
     print("Migration complete.")

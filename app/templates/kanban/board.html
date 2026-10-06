@@ -1,0 +1,301 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<style>
+  .kb-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .kb-head h1 { font-family: var(--ss-font-display); font-size: 1.5rem; margin: 0 auto 0 0; }
+  .kb-head .crumb { color: var(--ss-muted); text-decoration: none; font-size: 0.9rem; }
+  .btn-sm { padding: 5px 11px; font-size: 0.85rem; }
+
+  .kb-board { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 12px; align-items: flex-start; }
+  .kb-col { flex: 0 0 280px; background: var(--ss-surface-alt); border: 1px solid var(--ss-border);
+            border-radius: var(--ss-r-card); display: flex; flex-direction: column; max-height: calc(100vh - 170px); }
+  .kb-col.inbox { border-color: var(--ss-accent); }
+  .kb-col-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px 6px; font-weight: 600; }
+  .kb-col-head .count { color: var(--ss-muted); font-weight: 500; font-size: 0.85rem; }
+  .kb-col-head .inbox-tag { font-size: 0.7rem; color: var(--ss-accent-strong); background: var(--ss-accent-soft);
+                            border-radius: var(--ss-r-pill); padding: 1px 7px; }
+  .kb-col-tools { display: none; padding: 0 12px 8px; gap: 4px; flex-wrap: wrap; }
+  .kb-board.editing .kb-col-tools { display: flex; }
+  .kb-col-tools form { display: contents; }
+  .kb-col-tools input { flex: 1 1 100%; padding: 4px 8px; }
+  .kb-col-tools .btn { padding: 3px 9px; font-size: 0.78rem; }
+
+  .kb-cards { flex: 1; overflow-y: auto; padding: 4px 8px; min-height: 48px; }
+  .kb-card { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: 8px;
+             padding: 9px 10px; margin-bottom: 8px; cursor: grab; box-shadow: var(--ss-shadow-card); }
+  .kb-card:hover { border-color: var(--ss-border-strong); }
+  .kb-card.dragging { opacity: 0.4; }
+  .kb-card .t { font-weight: 600; line-height: 1.3; display: flex; gap: 6px; align-items: flex-start; }
+  .kb-card .t span { flex: 1; }
+  .kb-card .t a { text-decoration: none; flex-shrink: 0; }
+  .kb-card .sub { color: var(--ss-muted); font-size: 0.83rem; margin-top: 3px; }
+  .kb-card .meta { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
+  .kb-card .meta .pill { font-size: 0.72rem; }
+  .fit-hi  { border-color: var(--ss-accent); color: var(--ss-accent-strong); background: var(--ss-accent-soft); }
+  .fit-mid { border-color: var(--ss-border-strong); color: var(--ss-muted); }
+  .fit-lo  { border-color: var(--ss-warn); color: var(--ss-warn); background: var(--ss-warn-bg); }
+  .kb-drop-marker { height: 3px; background: var(--ss-accent); border-radius: 2px; margin: -2px 0 6px; }
+  .kb-add { margin: 4px 8px 10px; background: none; border: 1px dashed var(--ss-border-strong);
+            border-radius: 8px; color: var(--ss-muted); padding: 6px; cursor: pointer; font: inherit; }
+  .kb-add:hover { color: var(--ss-accent-strong); border-color: var(--ss-accent); }
+  .kb-newcol { flex: 0 0 220px; }
+
+  dialog.kb-dlg { border: 1px solid var(--ss-border); border-radius: var(--ss-r-card); padding: 0;
+                  width: min(620px, calc(100vw - 32px)); background: var(--ss-surface); color: var(--ss-text); }
+  dialog.kb-dlg::backdrop { background: rgba(24, 50, 45, 0.35); }
+  .kb-dlg form.main { padding: 18px 20px; }
+  .kb-dlg h2 { margin: 0 0 12px; font-size: 1.15rem; }
+  .kb-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+  .kb-grid .full { grid-column: 1 / -1; }
+  .kb-grid label { display: block; margin-bottom: 3px; }
+  .kb-dlg .foot { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+  .kb-dlg .foot .spacer { flex: 1; }
+  .kb-dlg .stamp { color: var(--ss-muted); font-size: 0.78rem; margin-top: 10px; }
+  @media (max-width: 560px) { .kb-grid { grid-template-columns: 1fr; } body { margin: 16px; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kb-head">
+  <h1><a class="crumb" href="/kanban">Boards /</a> {{ board.name }}</h1>
+  <button class="btn btn-sm btn-ghost" type="button" id="toggle-edit">Edit columns</button>
+  <a class="btn btn-sm btn-ghost" href="/kanban/{{ board.slug }}/import" style="text-decoration:none;">Import CSV</a>
+  <button class="btn btn-sm btn-primary" type="button" onclick="openCard(null, {{ board.columns[0].id if board.columns else 0 }})">+ Add card</button>
+</div>
+
+{% if error %}<div class="banner banner-error">{{ error }}</div>{% endif %}
+{% if msg %}<div class="banner banner-success">{{ msg }}</div>{% endif %}
+
+<div class="kb-board" id="board">
+  {% for col in board.columns %}
+  <section class="kb-col{% if col.is_inbox %} inbox{% endif %}" data-column-id="{{ col.id }}">
+    <div class="kb-col-head">
+      <span>{{ col.name }}</span>
+      <span class="count">{{ col.cards|length }}</span>
+      {% if col.is_inbox %}<span class="inbox-tag" title="AI-written cards land here">inbox</span>{% endif %}
+    </div>
+    <div class="kb-col-tools">
+      <form method="post" action="/kanban/{{ board.slug }}/columns/{{ col.id }}">
+        <input name="name" value="{{ col.name }}" aria-label="Column name" />
+        <button class="btn" name="action" value="rename">Rename</button>
+        <button class="btn" name="action" value="left" title="Move left">←</button>
+        <button class="btn" name="action" value="right" title="Move right">→</button>
+        {% if not col.is_inbox %}
+        <button class="btn btn-danger" name="action" value="delete"
+                onclick="return confirm('Delete column {{ col.name|e }}? Only empty columns can be deleted.')">Delete</button>
+        {% endif %}
+      </form>
+    </div>
+    <div class="kb-cards" data-column-id="{{ col.id }}">
+      {% for card in col.cards %}
+      <article class="kb-card" draggable="true" data-id="{{ card.id }}" data-card='{{ card|tojson }}'>
+        <div class="t">
+          <span>{{ card.title }}</span>
+          {% if card.url %}<a href="{{ card.url }}" target="_blank" rel="noopener" title="Open listing" onclick="event.stopPropagation()">↗</a>{% endif %}
+        </div>
+        {% if card.company or card.location %}
+        <div class="sub">{{ card.company or "" }}{% if card.company and card.location %} · {% endif %}{{ card.location or "" }}</div>
+        {% endif %}
+        <div class="meta">
+          {% if card.fit_score %}
+          <span class="pill {{ 'fit-hi' if card.fit_score >= 4 else ('fit-mid' if card.fit_score == 3 else 'fit-lo') }}">fit {{ card.fit_score }}/5</span>
+          {% endif %}
+          {% if card.remote_type %}<span class="pill">{{ card.remote_type }}</span>{% endif %}
+          {% if card.salary_text %}<span class="pill">{{ card.salary_text }}</span>{% endif %}
+          {% if card.created_by == 'mcp' %}<span class="pill" title="Added by AI">🤖 AI</span>{% endif %}
+          {% if card.created_by == 'import' %}<span class="pill" title="Imported from CSV">imported</span>{% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    <button class="kb-add" type="button" onclick="openCard(null, {{ col.id }})">+ Add card</button>
+  </section>
+  {% endfor %}
+
+  <section class="kb-col kb-newcol kb-col-tools" style="padding:12px;">
+    <form method="post" action="/kanban/{{ board.slug }}/columns" style="display:flex; flex-direction:column; gap:6px;">
+      <input name="name" placeholder="New column name" required />
+      <button class="btn">Add column</button>
+    </form>
+  </section>
+</div>
+
+{% if archived %}
+<details style="margin-top:16px;">
+  <summary class="muted">Archived cards ({{ archived|length }}). These jobs won't be re-added by the AI.</summary>
+  <table style="margin-top:8px;">
+    <thead><tr><th>Title</th><th>Company</th><th>Column</th><th>Archived</th><th></th></tr></thead>
+    <tbody>
+    {% for c in archived %}
+      <tr>
+        <td>{% if c.url %}<a href="{{ c.url }}" target="_blank" rel="noopener">{{ c.title }}</a>{% else %}{{ c.title }}{% endif %}</td>
+        <td>{{ c.company or "" }}</td>
+        <td>{{ c.column_name }}</td>
+        <td class="muted">{{ c.archived_at[:10] }}</td>
+        <td>
+          <form method="post" action="/kanban/cards/{{ c.id }}/archive">
+            <input type="hidden" name="archived" value="0" />
+            <button class="btn btn-sm">Restore</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</details>
+{% endif %}
+
+<dialog class="kb-dlg" id="card-dlg">
+  <form class="main" method="post" id="card-form">
+    <h2 id="dlg-title">Card</h2>
+    <div class="kb-grid">
+      <div class="full"><label for="f-title">Title</label><input id="f-title" name="title" required /></div>
+      <div><label for="f-company">Company</label><input id="f-company" name="company" /></div>
+      <div><label for="f-location">Location</label><input id="f-location" name="location" /></div>
+      <div>
+        <label for="f-remote_type">Work type</label>
+        <select id="f-remote_type" name="remote_type">
+          <option value="">—</option>
+          {% for r in remote_types %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="f-salary_text">Salary</label><input id="f-salary_text" name="salary_text" /></div>
+      <div class="full"><label for="f-url">Listing URL</label><input id="f-url" name="url" type="url" /></div>
+      <div><label for="f-source">Source</label><input id="f-source" name="source" placeholder="indeed, linkedin…" /></div>
+      <div><label for="f-posted_date">Date posted</label><input id="f-posted_date" name="posted_date" /></div>
+      <div>
+        <label for="f-fit_score">Fit score</label>
+        <select id="f-fit_score" name="fit_score">
+          <option value="">—</option>
+          {% for n in range(5, 0, -1) %}<option value="{{ n }}">{{ n }} / 5</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="f-column_id">Column</label>
+        <select id="f-column_id" name="column_id">
+          {% for col in board.columns %}<option value="{{ col.id }}">{{ col.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="full"><label for="f-description">Description</label><textarea id="f-description" name="description" rows="3"></textarea></div>
+      <div class="full"><label for="f-notes">Notes</label><textarea id="f-notes" name="notes" rows="4"></textarea></div>
+      <input type="hidden" id="f-external_id" name="external_id" />
+    </div>
+    <div class="stamp" id="dlg-stamp"></div>
+    <div class="foot">
+      <button class="btn btn-danger" type="submit" form="archive-form" id="archive-btn">Archive</button>
+      <span class="spacer"></span>
+      <button class="btn btn-ghost" type="button" onclick="document.getElementById('card-dlg').close()">Cancel</button>
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+  <form method="post" id="archive-form"><input type="hidden" name="archived" value="1" /></form>
+</dialog>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  const SLUG = {{ board.slug|tojson }};
+  const FIELDS = ["title", "company", "location", "remote_type", "url", "salary_text", "source",
+                  "external_id", "posted_date", "fit_score", "description", "notes"];
+  const dlg = document.getElementById("card-dlg");
+  const form = document.getElementById("card-form");
+
+  // ── Card dialog (add + edit) ─────────────────────────────────────────────
+  window.openCard = function (card, columnId) {
+    const editing = !!card;
+    document.getElementById("dlg-title").textContent = editing ? "Edit card" : "Add card";
+    form.action = editing ? `/kanban/cards/${card.id}` : `/kanban/${SLUG}/cards`;
+    for (const f of FIELDS) {
+      const el = document.getElementById("f-" + f);
+      el.value = editing && card[f] != null ? card[f] : "";
+    }
+    document.getElementById("f-column_id").value = editing ? card.column_id : columnId;
+    document.getElementById("archive-btn").style.display = editing ? "" : "none";
+    document.getElementById("archive-form").action = editing ? `/kanban/cards/${card.id}/archive` : "";
+    const by = { mcp: "AI (MCP)", import: "CSV import", user: "you" };
+    document.getElementById("dlg-stamp").textContent = editing
+      ? `Added ${card.created_at.slice(0, 10)} by ${by[card.created_by] || card.created_by}`
+        + (card.updated_at !== card.created_at ? ` · updated ${card.updated_at.slice(0, 10)}` : "")
+      : "";
+    dlg.showModal();
+    document.getElementById("f-title").focus();
+  };
+
+  document.querySelectorAll(".kb-card").forEach(el => {
+    el.addEventListener("click", () => openCard(JSON.parse(el.dataset.card)));
+  });
+
+  document.getElementById("toggle-edit").addEventListener("click", () => {
+    document.getElementById("board").classList.toggle("editing");
+  });
+
+  // ── Drag and drop ────────────────────────────────────────────────────────
+  let dragged = null;
+  const marker = document.createElement("div");
+  marker.className = "kb-drop-marker";
+
+  function cardAfter(container, y) {
+    const cards = [...container.querySelectorAll(".kb-card:not(.dragging)")];
+    return cards.find(c => {
+      const r = c.getBoundingClientRect();
+      return y < r.top + r.height / 2;
+    }) || null;
+  }
+
+  document.querySelectorAll(".kb-card").forEach(el => {
+    el.addEventListener("dragstart", e => {
+      dragged = el;
+      el.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", el.dataset.id);
+    });
+    el.addEventListener("dragend", () => {
+      el.classList.remove("dragging");
+      marker.remove();
+      dragged = null;
+    });
+  });
+
+  document.querySelectorAll(".kb-cards").forEach(container => {
+    container.addEventListener("dragover", e => {
+      if (!dragged) return;
+      e.preventDefault();
+      const after = cardAfter(container, e.clientY);
+      after ? container.insertBefore(marker, after) : container.appendChild(marker);
+    });
+    container.addEventListener("drop", async e => {
+      if (!dragged) return;
+      e.preventDefault();
+      const card = dragged;
+      const from = card.parentElement;
+      container.insertBefore(card, marker);
+      marker.remove();
+      const position = [...container.querySelectorAll(".kb-card")].indexOf(card);
+      refreshCounts();
+      try {
+        const resp = await fetch(`/kanban/cards/${card.dataset.id}/move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ column_id: Number(container.dataset.columnId), position }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error);
+        const c = JSON.parse(card.dataset.card);
+        c.column_id = Number(container.dataset.columnId);
+        card.dataset.card = JSON.stringify(c);
+      } catch (err) {
+        alert("Couldn't move the card: " + err.message + "\nReloading the board.");
+        location.reload();
+      }
+    });
+  });
+
+  function refreshCounts() {
+    document.querySelectorAll(".kb-col[data-column-id]").forEach(col => {
+      col.querySelector(".count").textContent = col.querySelectorAll(".kb-card").length;
+    });
+  }
+})();
+</script>
+{% endblock %}

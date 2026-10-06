@@ -110,6 +110,15 @@
 </div>
 {% endif %}
 
+{# ─── New job leads in the Job Search inbox ─── #}
+{% if job_inbox_count %}
+<div class="banner banner-success" style="display:flex; align-items:center; gap:12px; padding:10px 16px; margin-bottom:8px;">
+  <strong>{{ job_inbox_count }} new job lead{{ 's' if job_inbox_count > 1 else '' }}</strong>
+  <span style="color:var(--ss-muted); font-size:0.9em;">waiting in the Job Search inbox</span>
+  <a href="/kanban/job-search" class="btn btn-sm" style="margin-left:auto; white-space:nowrap;">Open board</a>
+</div>
+{% endif %}
+
 {# ─── Needs-attention strip (only when nags exist, dismissible) ───── #}
 {% if nags %}
 <div class="db-nag" id="db-nag-strip">

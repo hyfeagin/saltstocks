@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block extra_css %}
+<style>
+  .kb-index { max-width: 860px; }
+  .kb-index h1 { font-family: var(--ss-font-display); font-size: 1.5rem; margin: 0 0 12px; }
+  .kb-boards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .kb-boards a.card { display: block; margin: 0; text-decoration: none; color: inherit; }
+  .kb-boards a.card:hover { border-color: var(--ss-accent); }
+  .kb-boards h2 { margin: 0 0 4px; font-size: 1.05rem; color: var(--ss-accent-strong); }
+  .kb-cols { font-size: 0.82rem; color: var(--ss-muted); margin-top: 8px; line-height: 1.6; }
+  .kb-new { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 10px; align-items: end; }
+  @media (max-width: 640px) { .kb-new { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="kb-index">
+  <h1>Boards</h1>
+  {% if error %}<div class="banner banner-error">{{ error }}</div>{% endif %}
+  {% if msg %}<div class="banner banner-success">{{ msg }}</div>{% endif %}
+
+  <div class="kb-boards">
+    {% for b in boards %}
+    <a class="card" href="/kanban/{{ b.slug }}">
+      <h2>{{ b.name }}</h2>
+      <div class="muted">{{ b.card_count }} card{{ '' if b.card_count == 1 else 's' }}</div>
+      <div class="kb-cols">
+        {% for c in b.columns %}{{ c.name }} <strong>{{ c.card_count }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="card" style="margin-top:20px;">
+    <form class="kb-new" method="post" action="/kanban">
+      <div><label for="b-name">New board</label><input id="b-name" name="name" placeholder="e.g. Business Tasks" required /></div>
+      <div><label for="b-cols">Columns (comma-separated)</label><input id="b-cols" name="columns" placeholder="To Do, Doing, Done" /></div>
+      <button class="btn btn-primary">Create</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

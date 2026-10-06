@@ -227,6 +227,13 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
     except Exception:
         mcp_pending_count = 0
 
+    # ── New job leads waiting in the Job Search inbox ────────────────
+    try:
+        from ..services.kanban import inbox_count
+        job_inbox_count = inbox_count(conn, "job-search")
+    except Exception:
+        job_inbox_count = 0
+
     return render(
         "dashboard.html",
         request,
@@ -248,6 +255,7 @@ def dashboard(request: Request, conn: sqlite3.Connection = Depends(get_db)):
         nags=nags,
         month_name=today.strftime("%b"),
         mcp_pending_count=mcp_pending_count,
+        job_inbox_count=job_inbox_count,
     )
 # =========================
 # ANCHOR: DASHBOARD_VIEW_END

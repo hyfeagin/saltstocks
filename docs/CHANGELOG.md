@@ -4,6 +4,21 @@ All notable changes to SaltStocks are documented here. Versions follow [Semantic
 
 ---
 
+## [2.5.0] — 2026-10-06
+
+### Added — Kanban Boards (Notion replacement for job search)
+
+- New `/kanban` module: any number of boards with custom columns. A seeded **Job Search** board (`/kanban/job-search`) has the columns New (inbox) → Interested → Applied → Interviewing → Offer → Closed.
+- **Board view**: drag-and-drop cards between and within columns (vanilla HTML5 DnD, no new dependency). A card dialog handles add and edit for job fields (company, location, work type, URL, salary, source, posted date, fit score 1–5, description, notes). Archiving and restoring happen in the UI only, and columns can be added, renamed, reordered, or deleted when empty.
+- **Dedup**: each job card gets a `dedup_key` (canonical listing URL, then source + external id, then company|title|location), protected by `UNIQUE(board_id, dedup_key)`. Archived cards keep their key, so rejected jobs are never re-added.
+- **MCP tools** (`app/mcp/kanban_tools.py`): `list_boards`, `get_board_cards`, `add_job_cards` (up to 50 per call, duplicates skipped and reported), `update_card`, and `move_card`. These write directly to the board's inbox column, with no `mcp_pending_writes` staging. There is no delete tool. The server instructions now describe the job-lead workflow, and the server name changed from "SaltStocks Financial Data" to "SaltStocks".
+- **CSV import** (`/kanban/{slug}/import`) for Notion database exports: column auto-mapping you can adjust, Status → board column (unmatched statuses become new columns), unmapped columns appended to notes, and a preview before commit. Re-importing is safe.
+- Dashboard banner showing the number of new job leads in the Job Search inbox. "Boards" link added to the nav.
+- Database migration: new tables `kanban_boards`, `kanban_columns`, `kanban_cards` (`migrate_kanban()` in `app/migrate.py`).
+- Tests: `tests/test_kanban.py` (16 tests: service, dedup, ordering, columns, import, MCP tools).
+
+---
+
 ## [2.4.0] — 2026-06-05
 
 ### Added — Materials & Production Tracking

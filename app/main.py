@@ -14,7 +14,7 @@ from .auth import get_session_secret
 from .db import init_db
 from .migrate import migrate
 from .deps import BACKUP_DIR
-from .routers import dashboard, resale, config, ebay, materials
+from .routers import dashboard, resale, config, ebay, materials, kanban
 from .routers import auth as auth_router
 from .accounting import routes as accounting_routes
 from .mcp.server import create_asgi_app as _create_mcp_app
@@ -44,6 +44,7 @@ app.include_router(resale.router)
 app.include_router(config.router)
 app.include_router(ebay.router)
 app.include_router(materials.router)
+app.include_router(kanban.router)
 app.include_router(accounting_routes.router, prefix="/accounting")
 
 _PUBLIC_PATHS = {"/login", "/setup"}
